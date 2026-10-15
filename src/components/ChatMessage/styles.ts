@@ -1,0 +1,449 @@
+import type { ThemeColors, ThemeShadows } from '../../theme';
+import { TYPOGRAPHY, SPACING, FONTS } from '../../constants';
+
+/**
+ * How wide a message is allowed to be, as ONE number.
+ *
+ * A tool row belongs to the bubble above it, so it has to end where that bubble ends - a row that
+ * stretched the full screen put its chevron past the bubble's right edge, which read as the row
+ * belonging to the screen rather than to the message. This lived as a repeated '85%' in four
+ * places, so the row and the bubble could drift apart silently.
+ */
+const MESSAGE_MAX_WIDTH = '85%' as const;
+
+const createBubbleStyles = (colors: ThemeColors, shadows: ThemeShadows) => ({
+  container: {
+    marginVertical: 6,
+    paddingHorizontal: 16,
+  },
+  userContainer: {
+    alignItems: 'flex-end' as const,
+  },
+  assistantContainer: {
+    alignItems: 'flex-start' as const,
+  },
+  systemInfoContainer: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    alignItems: 'center' as const,
+  },
+  systemInfoText: {
+    ...TYPOGRAPHY.meta,
+    color: colors.textMuted,
+    textAlign: 'center' as const,
+  },
+  // A tool-call reply's content column — matches the assistant bubble width (85%) + left alignment
+  // so the thinking box, pre-text, and tool cards line up with every other AI message.
+  toolCallReplyContent: {
+    width: MESSAGE_MAX_WIDTH,
+    alignSelf: 'flex-start' as const,
+  },
+  toolCallPreText: {
+    alignSelf: 'flex-start' as const,
+    paddingBottom: 6,
+    width: '100%' as any,
+  },
+  /**
+   * ONE rhythm for every tool row, whatever produced it.
+   *
+   * A requested call, a synced artifact and a finished result are the same thing at three moments,
+   * so they get the same container: one row per container, the same 8px above and below, left
+   * aligned in the assistant column. They used to disagree. A turn's requested calls were grouped
+   * N-to-a-container at 2px apart, centred and inset 16px INSIDE the 85% assistant column, while a
+   * result stood alone, centred and inset 16px from the SCREEN - two left edges and two gaps, which
+   * read as tool calls nested inside one another and as rows bunching mid-stream.
+   */
+  toolRow: {
+    // No maxWidth here. The parent column (toolCallReplyContent) is ALREADY the bubble's width, so
+    // capping the row at 85% again applied the same 85% twice: the row ended ~13% short of the
+    // bubble above it and its chevron stopped mid-bubble instead of at the bubble's right edge.
+    // Stretching to the column is what makes the row end exactly where its message ends.
+    alignSelf: 'stretch' as const,
+    alignItems: 'flex-start' as const,
+    paddingVertical: 4,
+  },
+  messageFooterRow: {
+    paddingVertical: 4,
+    width: MESSAGE_MAX_WIDTH,
+    alignSelf: 'flex-start' as const,
+  },
+  messageFooterHeader: {
+    paddingVertical: 0,
+  },
+  /**
+   * The head of a call/result pair: the "Using X" row, which is always followed by the row carrying
+   * that same call's duration. They are one event, so they sit closer to each other than to the next
+   * call - otherwise a transcript reads as a flat list of unrelated rows at identical spacing.
+   */
+  toolRowPaired: {
+    // Same column as toolRow, and same reason for not re-applying MESSAGE_MAX_WIDTH.
+    alignSelf: 'stretch' as const,
+    alignItems: 'flex-start' as const,
+    paddingTop: 4,
+    paddingBottom: 0,
+  },
+  /**
+   * The gutter a standalone tool-result message sits in: the same left edge as `container`, and
+   * deliberately NO vertical margin. `container` carries `marginVertical: 8`, which on top of the
+   * row's own 8px padding would space two results 32px apart while the requested calls inside one
+   * assistant turn sat at 16px - the same unequal rhythm, reintroduced from the other side.
+   */
+  toolMessageRow: {
+    paddingHorizontal: 16,
+    alignItems: 'flex-start' as const,
+  },
+  toolStatusRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    alignSelf: 'stretch' as const,
+    gap: 6,
+    paddingVertical: 2,
+  },
+  toolStatusText: {
+    fontSize: 12,
+    fontFamily: FONTS.mono,
+    color: colors.textMuted,
+    flex: 1,
+  },
+  toolStatusTextCompact: {
+    flex: 0,
+    flexShrink: 1,
+  },
+  toolDetailContainer: {
+    marginTop: 6,
+    paddingTop: 6,
+    paddingHorizontal: 4,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    alignSelf: 'stretch' as const,
+    width: '100%' as const,
+    overflow: 'hidden' as const,
+  },
+  toolDetailText: {
+    fontSize: 11,
+    fontFamily: FONTS.mono,
+    color: colors.textSecondary,
+    lineHeight: 16,
+  },
+  bubble: {
+    maxWidth: MESSAGE_MAX_WIDTH,
+    borderRadius: 8,
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.md,
+    ...shadows.small,
+  },
+  bubbleWithAttachments: {
+    paddingHorizontal: 8,
+    paddingTop: 8,
+    paddingBottom: 12,
+  },
+  userBubble: {
+    backgroundColor: colors.primary,
+    borderBottomRightRadius: 4,
+  },
+  assistantBubble: {
+    backgroundColor: colors.surface,
+    borderBottomLeftRadius: 4,
+    minWidth: '85%' as const,
+  },
+  attachmentsContainer: {
+    // Stack attachments vertically (voice note on top, image below) instead of side-by-side —
+    // a voice-note + image message rendered in a row looked broken (device 2026-07-14).
+    flexDirection: 'column' as const,
+    gap: 4,
+    marginBottom: 8,
+  },
+  attachmentWrapper: {
+    borderRadius: 12,
+    overflow: 'hidden' as const,
+  },
+  documentBadge: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  audioBadge: {
+    flexDirection: 'column' as const,
+    gap: SPACING.xs,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: SPACING.xs,
+    borderRadius: 8,
+    maxWidth: 260,
+  },
+  audioBadgeHeader: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: SPACING.xs,
+  },
+  documentBadgeUser: {
+    backgroundColor: 'rgba(0, 0, 0, 0.15)',
+  },
+  documentBadgeAssistant: {
+    backgroundColor: colors.surfaceLight,
+  },
+  documentBadgeText: {
+    fontSize: 12,
+    fontFamily: FONTS.mono,
+    fontWeight: '500' as const,
+    maxWidth: 140,
+  },
+  documentBadgeTextUser: {
+    color: colors.background,
+  },
+  documentBadgeTextAssistant: {
+    color: colors.text,
+  },
+  documentBadgeSize: {
+    fontSize: 10,
+    fontFamily: FONTS.mono,
+  },
+  documentBadgeSizeUser: {
+    color: 'rgba(0, 0, 0, 0.4)',
+  },
+  documentBadgeSizeAssistant: {
+    color: colors.textMuted,
+  },
+  attachmentImage: {
+    // Full width of the bubble, with the height following the picture's own shape. A fixed 140 square
+    // left a band of empty bubble beside every image, and cropped anything that was not square.
+    // The ratio comes from the attachment, because only it knows its shape.
+    width: '100%' as const,
+    borderRadius: 12,
+  },
+});
+
+const createThinkingStyles = (colors: ThemeColors, shadows: ThemeShadows) => ({
+  text: {
+    ...TYPOGRAPHY.body,
+    lineHeight: 20,
+    paddingHorizontal: 0,
+  },
+  userText: {
+    color: colors.background,
+    fontWeight: '400' as const,
+  },
+  assistantText: {
+    color: colors.text,
+    fontWeight: '400' as const,
+  },
+  cursor: {
+    color: colors.primary,
+    fontWeight: '300' as const,
+  },
+  thinkingContainer: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    paddingVertical: 4,
+  },
+  thinkingDots: {
+    flexDirection: 'row' as const,
+    marginRight: 8,
+  },
+  thinkingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.primary,
+    marginHorizontal: 2,
+  },
+  thinkingText: {
+    ...TYPOGRAPHY.body,
+    color: colors.textSecondary,
+    fontStyle: 'italic' as const,
+  },
+  thinkingBlock: {
+    backgroundColor: colors.surfaceLight,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadows.small,
+    marginBottom: 8,
+    width: '100%' as const,
+  },
+  /** Full-width ThinkingBlock when rendered outside a message bubble (e.g. ToolCallWithThinking).
+   *  Uses alignSelf:'stretch' (NOT a percentage width) because the parent systemInfoContainer
+   *  centers its children (alignItems:'center'); a percentage width + alignSelf there fails to
+   *  resolve on iOS and the COLLAPSED block falls back to content width — a tiny square with no
+   *  visible preview. Stretch fills the parent width in both collapsed and expanded states. */
+  thinkingBlockWrapper: {
+    alignSelf: 'stretch' as const,
+    // The same padding a tool row carries, so a thinking block joins the same rhythm instead of
+    // sitting flush against the row above it.
+    paddingVertical: 4,
+  },
+  thinkingHeader: {
+    flexDirection: 'row' as const,
+    alignItems: 'flex-start' as const,
+    padding: 8,
+    gap: 6,
+  },
+  thinkingHeaderIconBox: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    backgroundColor: `${colors.primary}30`,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  thinkingHeaderIconText: {
+    ...TYPOGRAPHY.label,
+    fontWeight: '600' as const,
+    color: colors.primary,
+  },
+  thinkingHeaderTextContainer: {
+    flex: 1,
+    marginRight: SPACING.xs,
+  },
+  thinkingHeaderText: {
+    ...TYPOGRAPHY.bodySmall,
+    color: colors.textMuted,
+    fontWeight: '500' as const,
+  },
+  thinkingPreview: {
+    marginTop: 6,
+    opacity: 0.8,
+  },
+  thinkingPreviewText: {
+    ...TYPOGRAPHY.bodySmall,
+    color: colors.textMuted,
+  },
+  thinkingToggle: {
+    ...TYPOGRAPHY.meta,
+    color: colors.textMuted,
+  },
+  thinkingBlockText: {
+    ...TYPOGRAPHY.h3,
+    color: colors.textSecondary,
+    lineHeight: 18,
+    padding: SPACING.sm,
+    paddingTop: 0,
+    fontStyle: 'italic' as const,
+  },
+  thinkingBlockContent: {
+    padding: SPACING.sm,
+    paddingTop: 0,
+  },
+  streamingThinkingHint: {
+    marginTop: 8,
+  },
+  metaRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    marginTop: 6,
+    marginHorizontal: 8,
+    gap: 8,
+  },
+  timestamp: {
+    ...TYPOGRAPHY.meta,
+    color: colors.textMuted,
+  },
+  generationTime: {
+    ...TYPOGRAPHY.meta,
+    fontWeight: '400' as const,
+    color: colors.primary,
+  },
+  actionHint: {
+    padding: 4,
+  },
+  actionHintText: {
+    ...TYPOGRAPHY.bodySmall,
+    color: colors.textMuted,
+    letterSpacing: 1,
+  },
+  generationMetaRow: {
+    flexDirection: 'row' as const,
+    flexWrap: 'wrap' as const,
+    alignItems: 'center' as const,
+    gap: 3,
+  },
+  generationMetaContainer: {
+    alignSelf: 'stretch' as const,
+    marginTop: 0,
+  },
+  generationMetaText: {
+    ...TYPOGRAPHY.meta,
+    color: colors.textMuted,
+    flexShrink: 1,
+  },
+  generationMetaSep: {
+    ...TYPOGRAPHY.meta,
+    color: colors.textMuted,
+    opacity: 0.5,
+  },
+});
+
+const createActionStyles = (colors: ThemeColors) => ({
+  actionSheetContent: {
+    paddingHorizontal: SPACING.lg,
+    paddingBottom: SPACING.xl,
+  },
+  actionSheetItem: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    paddingVertical: SPACING.md,
+    paddingHorizontal: SPACING.sm,
+    gap: SPACING.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  actionSheetText: {
+    ...TYPOGRAPHY.body,
+    color: colors.text,
+  },
+  editSheetContent: {
+    paddingHorizontal: SPACING.lg,
+    paddingBottom: SPACING.xl,
+  },
+  editInput: {
+    ...TYPOGRAPHY.body,
+    fontFamily: FONTS.mono,
+    backgroundColor: colors.surface,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: SPACING.md,
+    color: colors.text,
+    minHeight: 100,
+    maxHeight: 300,
+    textAlignVertical: 'top' as const,
+  },
+  editActions: {
+    flexDirection: 'row' as const,
+    gap: SPACING.sm,
+    marginTop: SPACING.lg,
+  },
+  editButton: {
+    flex: 1,
+    paddingVertical: SPACING.md,
+    borderRadius: 4,
+    alignItems: 'center' as const,
+    borderWidth: 1,
+  },
+  editButtonCancel: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+  },
+  editButtonSave: {
+    backgroundColor: 'transparent' as const,
+    borderColor: colors.primary,
+  },
+  editButtonText: {
+    ...TYPOGRAPHY.label,
+    fontFamily: FONTS.mono,
+    color: colors.textSecondary,
+    letterSpacing: 1,
+  },
+  editButtonTextSave: {
+    color: colors.primary,
+    fontWeight: '600' as const,
+  },
+});
+
+export const createStyles = (colors: ThemeColors, shadows: ThemeShadows) => ({
+  ...createBubbleStyles(colors, shadows),
+  ...createThinkingStyles(colors, shadows),
+  ...createActionStyles(colors),
+});

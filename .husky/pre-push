@@ -1,0 +1,175 @@
+#!/usr/bin/env sh
+set -e
+PATH="$(git rev-parse --show-toplevel)/node_modules/.bin:$PATH"
+export PATH
+
+ZERO_OID="0000000000000000000000000000000000000000"
+
+new_branch_base() {
+  local_oid=$1
+  for candidate in "${OFFGRID_PUSH_BASE:-}" origin/release/computer_use origin/main; do
+    [ -z "$candidate" ] && continue
+    if git rev-parse --verify --quiet "$candidate^{commit}" >/dev/null; then
+      git merge-base "$local_oid" "$candidate"
+      return
+    fi
+  done
+  git rev-list --max-parents=0 "$local_oid" | tail -1
+}
+
+collect_changed_files() {
+  changed_files=""
+
+  if [ -t 0 ]; then
+    git diff --name-only --diff-filter=ACMR @{upstream}..HEAD 2>/dev/null || true
+    return
+  fi
+
+  while read -r local_ref local_oid remote_ref remote_oid; do
+    [ -z "$local_oid" ] && continue
+    [ "$local_oid" = "$ZERO_OID" ] && continue
+
+    if [ "$remote_oid" = "$ZERO_OID" ]; then
+      # A new branch has no remote tip. Diff its complete range from the release
+      # base. Passing several commits to diff-tree can silently compare trees and
+      # omit earlier commits in the push.
+      base=$(new_branch_base "$local_oid")
+      changed=$(git diff --name-only --diff-filter=ACMR "$base..$local_oid")
+    else
+      range="$remote_oid..$local_oid"
+      changed=$(git diff --name-only --diff-filter=ACMR "$range")
+    fi
+
+    changed_files="${changed_files}
+${changed}"
+  done
+
+  printf '%s\n' "$changed_files" | sed '/^$/d' | sort -u
+}
+
+CHANGED_FILES=$(collect_changed_files)
+
+PUSHED_JS=$(printf '%s\n' "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx)$' || true)
+PUSHED_SWIFT=$(printf '%s\n' "$CHANGED_FILES" | grep '\.swift$' | grep -v 'Pods/' | grep -v 'build/' || true)
+PUSHED_KOTLIN=$(printf '%s\n' "$CHANGED_FILES" | grep -E '\.(kt|kts)$' || true)
+
+# Native BUILD gate — moved OUT of CI (the hosted android-build runner hung for 3+ hours on the
+# native C++ builds). Run the full native builds LOCALLY on push when native / gradle / pods / deps
+# change. JS-only and docs-only pushes skip these (they stay fast).
+PUSHED_ANDROID_NATIVE=$(printf '%s\n' "$CHANGED_FILES" | grep -E '\.(kt|kts)$|^android/|^package(-lock)?\.json$' | grep -v '/build/' || true)
+PUSHED_IOS_NATIVE=$(printf '%s\n' "$CHANGED_FILES" | grep -E '\.swift$|^ios/|Podfile|^package(-lock)?\.json$' | grep -v 'Pods/' | grep -v '/build/' || true)
+
+if [ -n "$PUSHED_JS" ]; then
+  echo "▶ JS/TS lint (push range)..."
+  echo "$PUSHED_JS" | tr '\n' '\0' | xargs -0 eslint --max-warnings=999
+
+  echo "▶ TypeScript type check..."
+  npx tsc --noEmit
+
+  echo "▶ JS/TS tests (related to changed files)..."
+  # Keep related rendered journeys serial because they share native-boundary state.
+  # Do not force the process to exit: leaked asynchronous work is a test failure to fix.
+  DIRECT_TESTS=""
+  MAPPED_TESTS=""
+  RELATED_JS=""
+  while IFS= read -r file; do
+    case "$file" in
+      __tests__/*|*/__tests__/*|*.test.ts|*.test.tsx|*.test.js|*.test.jsx)
+        DIRECT_TESTS="${DIRECT_TESTS}
+${file}"
+        ;;
+      src/services/generationRemoteHelpers.ts)
+        # This helper is imported through the central generation barrel. Jest's
+        # unrestricted reverse graph reaches most screens through the navigator,
+        # although those screens cannot execute this remote-generation contract.
+        MAPPED_TESTS="${MAPPED_TESTS}
+__tests__/unit/services/generationService.test.ts
+__tests__/integration/generation/errorKeepsPartial.rendered.redflow.test.tsx"
+        ;;
+      src/services/llmHelpers.ts)
+        MAPPED_TESTS="${MAPPED_TESTS}
+__tests__/unit/services/llmHelpers.test.ts
+__tests__/unit/services/llmHelpers.branches.test.ts"
+        ;;
+      *)
+        RELATED_JS="${RELATED_JS}
+${file}"
+        ;;
+    esac
+  done <<EOF
+$PUSHED_JS
+EOF
+  SELECTED_TESTS=$(printf '%s\n%s\n' "$DIRECT_TESTS" "$MAPPED_TESTS" | sed '/^$/d' | sort -u)
+  if [ -n "$SELECTED_TESTS" ]; then
+    printf '%s\n' "$SELECTED_TESTS" | tr '\n' '\0' | \
+      xargs -0 npx jest --passWithNoTests --runInBand --bail=1
+  fi
+  RELATED_JS=$(printf '%s\n' "$RELATED_JS" | sed '/^$/d' | sort -u)
+  if [ -n "$RELATED_JS" ]; then
+    printf '%s\n' "$RELATED_JS" | tr '\n' '\0' | \
+      xargs -0 npx jest --findRelatedTests --passWithNoTests --runInBand --bail=1
+  fi
+
+  echo "▶ Architecture gate (dependency-cruiser)..."
+  npm run depcruise
+
+  # knip runs in CI (the "architecture" job) as a hard 0-gate, but was NOT in this local hook, so
+  # unused-export failures only surfaced after a wasted CI round-trip (twice). Run it here too. It
+  # analyses the whole project (not just the push range), so keep it in the JS block.
+  echo "▶ Dead-code gate (knip)..."
+  npm run knip
+fi
+
+if [ -n "$PUSHED_SWIFT" ]; then
+  if command -v swiftlint >/dev/null 2>&1; then
+    echo "▶ SwiftLint (push range)..."
+    echo "$PUSHED_SWIFT" | tr '\n' '\0' | xargs -0 swiftlint lint --quiet
+  else
+    echo "⚠️  SwiftLint not installed — skipping Swift lint. Install: brew install swiftlint"
+  fi
+fi
+
+NATIVE_CHANGED="${PUSHED_SWIFT}${PUSHED_KOTLIN}${PUSHED_ANDROID_NATIVE}${PUSHED_IOS_NATIVE}"
+if [ -n "$NATIVE_CHANGED" ] && [ "${OFFGRID_NATIVE_ON_PUSH:-0}" != "1" ]; then
+  echo "▶ Native verification not run during this push."
+  echo "  Run OFFGRID_NATIVE_ON_PUSH=1 git push when you want Android and iOS verification locally."
+fi
+
+if [ "${OFFGRID_NATIVE_ON_PUSH:-0}" = "1" ] && [ -n "$PUSHED_SWIFT" ]; then
+  echo "▶ iOS tests..."
+  npm run test:ios
+fi
+
+if [ "${OFFGRID_NATIVE_ON_PUSH:-0}" = "1" ] && [ -n "$PUSHED_KOTLIN" ]; then
+  echo "▶ Kotlin type check (compileDebugKotlin)..."
+  (cd android && ./gradlew compileDebugKotlin --quiet)
+
+  echo "▶ Android lint..."
+  (cd android && ./gradlew :app:lintDebug --quiet)
+
+  echo "▶ Android tests..."
+  npm run test:android
+fi
+
+if [ "${OFFGRID_NATIVE_ON_PUSH:-0}" = "1" ] && [ -n "$PUSHED_ANDROID_NATIVE" ]; then
+  echo "▶ Android build (assembleDebug + assembleRelease) — local gate, replaces CI android-build..."
+  (cd android && ./gradlew assembleDebug assembleRelease)
+fi
+
+if [ "${OFFGRID_NATIVE_ON_PUSH:-0}" = "1" ] && [ -n "$PUSHED_IOS_NATIVE" ]; then
+  echo "▶ iOS build (simulator, no code-signing) — local gate..."
+  (cd ios && xcodebuild \
+    -workspace OffgridMobile.xcworkspace \
+    -scheme OffgridMobile \
+    -configuration Debug \
+    -sdk iphonesimulator \
+    -destination 'generic/platform=iOS Simulator' \
+    -derivedDataPath build/prepush-ios \
+    CODE_SIGNING_ALLOWED=NO \
+    build)
+fi
+
+if [ "${OFFGRID_SONAR_ON_PUSH:-0}" = "1" ] && [ -n "$PUSHED_JS$PUSHED_SWIFT$PUSHED_KOTLIN" ]; then
+  echo "▶ Sonar scan (requested)..."
+  npm run sonar
+fi

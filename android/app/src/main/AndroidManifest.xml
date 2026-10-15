@@ -1,0 +1,144 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Off Grid Sync: NSD/mDNS multicast for device discovery (react-native-zeroconf). -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+
+    <uses-permission android:name="com.android.vending.BILLING" tools:node="remove" />
+
+    <!-- For voice recording -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- Requested only when the user opens the QR scanner. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+
+    <!-- For haptic feedback -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!-- For downloading models on older Android versions -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+
+    <!-- Automatic screenshot and download sharing read the media the system already indexed.
+         Android 11 stopped granting the Download folder through the file picker, so MediaStore
+         with a media permission is the only path left for it. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+
+    <!-- A media permission only ever shows the media in Download, so a downloaded PDF or zip - most
+         of a real Downloads folder - stays invisible. This is the only remaining way to share those
+         files device to device, it is never requested on its own, and downloads sharing works without
+         it on media alone. Play requires the All files access declaration for this. -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
+
+    <!-- For silent companion file downloads (e.g. mmproj for vision models) -->
+    <uses-permission android:name="android.permission.DOWNLOAD_WITHOUT_NOTIFICATION" />
+
+<!-- To check and request battery optimization exemption for uninterrupted downloads -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <!-- Run large model downloads as a foreground service so they keep progressing when
+         the app is backgrounded / the screen is off (WorkManager foreground worker). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Personal Mesh keeps a live local-network connection to paired devices. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <!-- Android 13+ needs this to SHOW the ongoing download notification (requested at runtime). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- For reading and creating calendar events -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission android:name="android.permission.WRITE_CALENDAR" />
+
+    <application
+      android:name=".MainApplication"
+      android:label="@string/app_name"
+      android:icon="@mipmap/ic_launcher"
+      android:roundIcon="@mipmap/ic_launcher_round"
+      android:allowBackup="false"
+      android:theme="@style/AppTheme"
+      android:networkSecurityConfig="@xml/network_security_config"
+      android:supportsRtl="true"
+      android:largeHeap="true"
+      android:hardwareAccelerated="true"
+      android:extractNativeLibs="true"
+      android:appComponentFactory="androidx.core.app.CoreComponentFactory"
+      tools:replace="android:appComponentFactory">
+
+      <!-- GPU-accelerated LLM inference on Qualcomm SoCs -->
+      <uses-native-library android:name="libOpenCL.so" android:required="false" />
+      <uses-native-library android:name="libvndksupport.so" android:required="false" />
+      <uses-native-library android:name="libcdsprpc.so" android:required="false" />
+      <activity
+        android:name=".MainActivity"
+        android:label="@string/app_name"
+        android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
+        android:launchMode="singleTask"
+        android:windowSoftInputMode="adjustResize"
+        android:theme="@style/SplashTheme"
+        android:exported="true">
+        <intent-filter>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent-filter>
+        <!-- MCP OAuth redirect: offgrid://oauth/callback returns from the browser -->
+        <intent-filter>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.DEFAULT" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="offgrid" android:host="oauth" />
+        </intent-filter>
+      </activity>
+
+      <!-- Android does not let normal background apps read the system clipboard. This explicit
+           selection-menu action receives only the text the user chose and stores it until the
+           existing clipboard sync owner can import it. -->
+      <activity
+          android:name="ai.offgridmobile.clipboard.ProcessTextActivity"
+          android:label="@string/process_text_action_label"
+          android:exported="true"
+          android:excludeFromRecents="true"
+          android:noHistory="true"
+          android:theme="@android:style/Theme.Translucent.NoTitleBar">
+        <intent-filter>
+          <action android:name="android.intent.action.PROCESS_TEXT" />
+          <category android:name="android.intent.category.DEFAULT" />
+          <data android:mimeType="text/plain" />
+        </intent-filter>
+      </activity>
+
+<!-- Receiver for background download completion events -->
+      <receiver
+          android:name=".download.DownloadCompleteBroadcastReceiver"
+          android:exported="true">
+          <intent-filter>
+              <action android:name="android.intent.action.DOWNLOAD_COMPLETE" />
+          </intent-filter>
+      </receiver>
+
+      <!-- WorkManager's foreground-service host needs the dataSync type declared, or
+           setForeground() throws on Android 14+ (the model-download FGS, see WorkerDownload). -->
+      <service
+          android:name="androidx.work.impl.foreground.SystemForegroundService"
+          android:foregroundServiceType="dataSync"
+          tools:node="merge" />
+
+      <!-- Personal Mesh residency: holds mDNS discovery, the TCP listener and in-flight
+           transfers open while Off Grid is backgrounded. Without it Android suspends the
+           process and the peer keeps showing this device as connected. Not exported - only
+           this app may start it. -->
+      <service
+          android:name="ai.offgridmobile.sync.MeshResidencyService"
+          android:enabled="true"
+          android:exported="false"
+          android:foregroundServiceType="connectedDevice" />
+
+    </application>
+</manifest>
