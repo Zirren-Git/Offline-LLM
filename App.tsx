@@ -22,7 +22,6 @@ import { useAppStore, useAuthStore, useRemoteServerStore, useWhisperStore } from
 import { useDebugLogsStore } from './src/stores/debugLogsStore';
 import { initDebugLogFile, appendDebugLine, stopDebugLogFile } from './src/utils/debugLogFile';
 import { startStartupMemoryProbe } from './src/services/startupMemoryProbe';
-import { loadProFeatures } from './src/bootstrap/loadProFeatures';
 import { hydrateDownloadStore } from './src/services/downloadHydration';
 import { initActiveDownloadPersistence } from './src/services/activeDownloadPersistence';
 import { restoreQueuedDownloads } from './src/services/restoreQueuedDownloads';
@@ -346,16 +345,7 @@ function App() {
       // The document services register for chat deletions (they free index entries no chat uses).
       import('./src/services/documents').catch((err) => logger.error('Failed to start document services', err));
 
-      try {
-        // Register the private Pro entitlement provider before the first status
-        // read, then activate only the capabilities that entitlement permits.
-        // loadProFeatures separately projects cached credential access from a
-        // Debug developer unlock; Sync reconciliation owns device admission.
-        logger.log('[BOOT] load pro features');
-        await loadProFeatures();
-      } catch (proError) {
-        logger.error('[App] Pro feature load failed, continuing without Pro:', proError);
-      }
+      // Paid (Pro) features have been removed; nothing to load here.
 
       // Show the UI immediately
       logger.log('[BOOT] startup complete');
