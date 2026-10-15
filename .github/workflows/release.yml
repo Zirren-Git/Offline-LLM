@@ -27,19 +27,6 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0  # Fetch all history for changelog
 
-      - name: Read pinned Pro revision
-        id: pro_revision
-        run: echo "sha=$(git rev-parse HEAD:pro)" >> "$GITHUB_OUTPUT"
-
-      - name: Check out pinned Pro source
-        uses: actions/checkout@v4
-        with:
-          repository: off-grid-ai/mobile-pro
-          token: ${{ secrets.PRO_SUBMODULE_PAT }}
-          path: pro
-          ref: ${{ steps.pro_revision.outputs.sha }}
-          persist-credentials: false
-
       - name: Check out shared packages
         uses: actions/checkout@v4
         with:
