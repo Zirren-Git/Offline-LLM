@@ -1,0 +1,53 @@
+buildscript {
+    ext {
+        buildToolsVersion = "36.0.0"
+        minSdkVersion = 24
+        compileSdkVersion = 36
+        targetSdkVersion = 36
+        ndkVersion = "27.1.12297006"
+        kotlinVersion = "2.4.0"
+        // react-native-inappbrowser-reborn otherwise requests dynamic `+`
+        // versions. Pin them so Gradle does not query unrelated repositories
+        // for metadata during an offline/local build.
+        androidXAnnotationVersion = "1.5.0"
+        androidXBrowserVersion = "1.4.0"
+    }
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        // LiteRT-LM 0.17.1 uses Kotlin 2.4 metadata; AGP's bundled D8/R8 is older.
+        classpath("com.android.tools:r8:9.1.43")
+        classpath("com.android.tools.build:gradle:8.8.2")
+        classpath("com.facebook.react:react-native-gradle-plugin")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:${kotlinVersion}")
+        classpath("com.google.devtools.ksp:com.google.devtools.ksp.gradle.plugin:2.3.12")
+    }
+}
+
+apply plugin: "com.facebook.react.rootproject"
+
+// Force every Android subproject (incl. third-party native modules like op-sqlite and
+// react-native-audio-api) onto the ONE pinned NDK. Without this, a module that declares
+// no ndkVersion falls back to the AGP-default NDK (27.0.12077973), which the app never
+// pins or installs — CI then fails to configure with "Failed to install ndk;27.0.12077973".
+// Applied via plugins.withId (runs when the Android plugin is applied) rather than
+// afterEvaluate — the latter threw "Cannot run afterEvaluate when the project is already
+// evaluated" for subprojects the React root plugin had already configured.
+subprojects { subproject ->
+    ["com.android.application", "com.android.library"].each { pluginId ->
+        subproject.plugins.withId(pluginId) {
+            subproject.android {
+                ndkVersion rootProject.ext.ndkVersion
+            }
+            if (subproject.name == "react-native-reanimated") {
+                // Worklets packages its own runtime. Reanimated imports that library
+                // for linking and must not package a second copy of it.
+                subproject.androidComponents.finalizeDsl { androidDsl ->
+                    androidDsl.packaging.jniLibs.excludes.add("**/libworklets.so")
+                }
+            }
+        }
+    }
+}

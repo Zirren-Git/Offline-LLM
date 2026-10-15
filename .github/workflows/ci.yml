@@ -1,0 +1,274 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+      - 'release/*'
+
+# ONE job, not four.
+#
+# lint, typecheck, architecture and test used to be separate jobs, and the only thing that made them
+# separate was the gate at the end - all four repeated the SAME seven setup steps (checkout, pro
+# submodule, node, java, two shared checkouts, install). That duplication was not just slow, it was
+# the bug: the shared-provisioning step was wrong in all four copies at once, and one of the four
+# (lint) had silently lost its `env: PRO_SUBMODULE_PAT`, so it never provisioned shared at all.
+#
+# Setup happens once here and every gate runs as a step against it. Each gate carries
+# `if: ${{ !cancelled() && steps.install.outcome == 'success' }}`, so a red gate does NOT hide the
+# ones after it - the whole list still reports, which is the one thing the four separate checks were
+# genuinely good at. The trade-off is wall-clock: the gates no longer run in parallel.
+jobs:
+  ci:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Detect trusted private-source access
+        id: private_sources
+        if: ${{ github.event_name != 'workflow_dispatch' }}
+        env:
+          PRO_SUBMODULE_PAT: ${{ secrets.PRO_SUBMODULE_PAT }}
+        run: |
+          if [ -n "$PRO_SUBMODULE_PAT" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Pull the private pro/ so the pro-dependent suites run against the REAL package — a green run
+      # then actually exercises pro, not a stub. It also matters to the other gates: tsc sees
+      # __tests__/pro/* importing @offgrid/pro/* (TS2307 without it), and knip/depcruise need it or
+      # their reachability graph is incomplete and reports false orphans. Forks without the secret skip
+      # this: proExists=false and jest runs the open-core suite instead.
+      #
+      # An explicit checkout of the MATCHING branch, not `git submodule update --init`. The submodule
+      # pointer is deliberately a pin - it records which pro revision a core commit was verified against
+      # - but a pin is the wrong thing for CI to test: a coordinated core+pro change would run this
+      # branch's core against whatever commit the pointer happens to hold, so the two halves of one
+      # change are never seen together. Matching branch first, PR base branch as the fallback, exactly as the
+      # shared checkout below and as OGAD does it.
+      - name: Check out the matching pro branch
+        if: ${{ steps.private_sources.outputs.available == 'true' }}
+        id: pro_branch
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: off-grid-ai/mobile-pro
+          token: ${{ secrets.PRO_SUBMODULE_PAT }}
+          path: pro
+          ref: ${{ github.head_ref || github.ref_name }}
+          persist-credentials: false
+      - name: Fall back to pro base branch
+        if: ${{ steps.private_sources.outputs.available == 'true' && steps.pro_branch.outcome != 'success' }}
+        uses: actions/checkout@v4
+        with:
+          repository: off-grid-ai/mobile-pro
+          token: ${{ secrets.PRO_SUBMODULE_PAT }}
+          path: pro
+          ref: ${{ github.base_ref || 'main' }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          # Node 26, pinned by the TEST gate and now shared by all of them. The RAG/knowledge-base
+          # suites run a REAL in-memory database via node's built-in `node:sqlite`
+          # (__tests__/harness/sqliteFake.ts). That module is absent on Node 20 and flag-gated on
+          # Node 22. On Node 24 it loads but its native teardown SEGFAULTs the process under jest's
+          # --forceExit (exit 139) — reproduced locally: the full suite exits 139 on Node 24 and
+          # exits 0 on Node 26. Node 26's node:sqlite fixes that teardown crash.
+          node-version: '26'
+          cache: 'npm'
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      # @offgrid/sync and @offgrid/rag are file: dependencies on the SIBLING shared monorepo
+      # ("file:../shared/packages/sync", "file:../shared/packages/rag"). They arrived with the sync
+      # work and nothing in CI ever provisioned them, so every gate failed on the same missing module
+      # wearing different hats: TS2307 in typecheck, 26 no-phantom-deps errors in the architecture
+      # gate, and 260 jest suites unable to resolve <workspace>/../shared/packages/sync/src/index.ts.
+      #
+      # actions/checkout refuses a path outside the workspace, so it lands inside and is moved up one
+      # level - which is exactly where the file: specifiers and jest's moduleNameMapper both point.
+      #
+      # Matching branch first, PR base branch as the fallback: a PR that changes the app and the shared package
+      # together has to be tested against the package it expects, not against main's copy.
+      - name: Check out the shared monorepo
+        if: ${{ steps.private_sources.outputs.available == 'true' }}
+        id: shared_branch
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: off-grid-ai/shared
+          token: ${{ secrets.PRO_SUBMODULE_PAT }}
+          path: _shared
+          ref: ${{ github.head_ref || github.ref_name }}
+          persist-credentials: false
+      - name: Fall back to shared base branch
+        if: ${{ steps.private_sources.outputs.available == 'true' && steps.shared_branch.outcome != 'success' }}
+        uses: actions/checkout@v4
+        with:
+          repository: off-grid-ai/shared
+          token: ${{ secrets.PRO_SUBMODULE_PAT }}
+          path: _shared
+          ref: ${{ github.base_ref || 'main' }}
+          persist-credentials: false
+      - name: Put shared beside this checkout
+        if: ${{ steps.private_sources.outputs.available == 'true' }}
+        run: |
+          rm -rf ../shared
+          mv _shared ../shared
+          # Install at the WORKSPACE ROOT, not inside packages/sync. shared is an npm-workspaces
+          # monorepo: the lock file and the build tool (tsup) live at the root, and packages/sync
+          # declares neither. Installing inside the member failed `npm ci` (no lock file there), fell
+          # through to `npm install`, pulled the member's five runtime deps, and left the build to die
+          # on `sh: 1: tsup: not found` (exit 127) — which took every gate down with it.
+          #
+          # A LOCKED install, and no fallback. `npm ci || npm install` was here to survive a drifted lock, but
+          # that just moves the failure: an unlocked install resolves a different graph and the later gates run
+          # against dependencies nobody committed. The drift it papered over was real (five packages committed to
+          # shared without regenerating its lock) and is fixed at the source; if it recurs, this should stop.
+          npm --prefix ../shared ci
+          # Build every shared package this app consumes, because npm resolves each file: dependency
+          # to its dist/ (Jest reads src/, but TypeScript and Metro read dist/).
+          npm --prefix ../shared/packages/sync run build
+          npm --prefix ../shared/packages/rag run build
+          npm --prefix ../shared/packages/models run build
+          npm --prefix ../shared/packages/speech run build
+          npm --prefix ../shared/packages/ui run build
+
+      - name: Install dependencies
+        id: install
+        run: npm ci
+
+      - name: Install SwiftLint
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: brew install swiftlint
+
+      # ── Gates. Every one runs even when an earlier one failed, so a single red gate cannot hide
+      # the rest; the job still fails if any of them do.
+      # ESLint ONLY - deliberately not `npm run lint`, which chains ./gradlew :app:lintDebug.
+      #
+      # Measured on run 31020019489: eslint finished in 36 SECONDS (15:24:59 -> 15:25:35); Android Lint then ran
+      # for 68 MINUTES, cold-configuring every React Native native module on a macOS runner
+      # (react-native-fs, background-downloader, documents/picker, audio-api, ...). It was 68 of the job's 90
+      # minutes - the whole reason a mobile PR took an hour and a half to report.
+      #
+      # Same call, and same reason, as the Android BUILD already documented below: the hosted runner is the wrong
+      # place for gradle work on this project. Android Lint stays a LOCAL pre-merge gate, run alongside the build
+      # it shares all that configuration cost with:
+      #     npm run lint:android      (cd android && ./gradlew :app:lintDebug)
+      # Android unit tests still run here (:app:testDebugUnitTest, ~2 min) - it is lint's full-graph configure
+      # that is pathological, not gradle itself.
+      - name: Lint (eslint)
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npx eslint .
+
+      - name: Type check
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npx tsc --noEmit
+
+      # Standing gates: dependency-cruiser (layering, engine DIP, import cycles, orphans — 0
+      # violations, no baseline) + knip (dead files/exports/types/deps — 0 issues). Both fail on
+      # anything NEW.
+      - name: Dependency-cruiser (architecture gate)
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npm run depcruise
+
+      - name: knip (dead-code gate)
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npm run knip
+
+      - name: Run Jest tests
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        env:
+          # Serial, but in ONE recycled worker instead of --runInBand.
+          #
+          # In band, every suite runs in the same process and the heap left after each suite only
+          # grows: measured locally on 2dbf3e75, it climbs from ~0.4 GB after the first suite to
+          # ~6.3 GB after the last, with a 7.1 GB peak RSS. The macos-26-arm64 runner has 7 GB of
+          # RAM, so the back half of the run swaps. That is why CI throughput collapses (100
+          # suites took ~3 min early in run 37503803398 and ~19 min at the end) and why a
+          # different set of late, otherwise fast tests times out on every run, on main too.
+          #
+          # --maxWorkers=1 keeps the run serial (the parallel run flaked on CPU contention, see
+          # b18e65f5). --workerIdleMemoryLimit replaces that worker once its heap passes 1 GB
+          # after a suite, so memory stays bounded for the whole run. The worker heap cap only
+          # has to fit one worker's lifetime now, not the whole suite, so it sits well below
+          # the runner's RAM and V8 collects before the box starts swapping.
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: npx jest --coverage --forceExit --maxWorkers=1 --workerIdleMemoryLimit=1GB
+
+      - name: Install Android NDK
+        # Configuring the native modules (op-sqlite etc.) needs the pinned NDK; the macOS
+        # runner doesn't ship it, so the android test task failed at configure with
+        # "Failed to install ndk;...". Install the version android/build.gradle forces.
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" "ndk;27.1.12297006" >/dev/null
+
+      - name: Run Android tests
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: cd android && ./gradlew :app:testDebugUnitTest --rerun-tasks
+
+      - name: Setup Ruby for iOS dependencies
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+
+      - name: Install iOS dependencies
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: bundle exec pod install --project-directory=ios
+
+      - name: Run iOS tests
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npm run test:ios
+
+      - name: Upload coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage/lcov.info
+          fail_ci_if_error: false
+
+      - name: Upload iOS test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-test-results
+          path: ~/Library/Developer/Xcode/DerivedData/**/Logs/Test/*.xcresult
+          if-no-files-found: ignore
+
+      - name: Upload Android test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-test-results
+          path: android/app/build/reports/tests/
+          if-no-files-found: ignore
+
+  # NOTE: the Android build is NOT run in CI — it is a LOCAL pre-merge gate instead (the hosted
+  # runner repeatedly hung for 3+ hours on the native C++ builds and burned hours). Run it locally
+  # before merging any change that touches native/Android/gradle/deps:
+  #     cd android && ./gradlew assembleDebug assembleRelease
+  # (see rules.md → On-device testing & verification). Docs-only / JS-only PRs don't need it.
+
+  # NOTE: SonarCloud runs via Automatic Analysis (SonarCloud-side, on the public core project) —
+  # no CI job. A CI scan would only add coverage import, which Codecov already does, so it'd be
+  # redundant complexity. Pro is scanned locally by eslint-plugin-sonarjs (free, private, no leak).
+  # See docs/GAPS_BACKLOG.md.

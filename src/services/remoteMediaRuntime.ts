@@ -1,0 +1,304 @@
+import { remoteServerManager } from './remoteServerManager';
+import type { RemoteMediaModelIds, RemoteServer } from '../types';
+import { REMOTE_FETCH_REDIRECT_POLICY, remoteAuthorizationHeaders } from './remoteTransportPolicy';
+import { remoteHttpErrorMessage } from './httpClient';
+import { OverridableMemoryError } from './modelLoadErrors';
+import logger from '../utils/logger';
+
+export interface RemoteImageResult {
+  base64?: string;
+  url?: string;
+}
+
+export interface RemoteVoiceResult {
+  audio: ArrayBuffer;
+  contentType: string;
+}
+
+export interface RemoteMediaRequestOptions {
+  signal?: AbortSignal;
+  override?: boolean;
+  onImageProgress?: (step: number, total: number) => void;
+}
+
+function endpoint(server: RemoteServer, path: string): string {
+  let base = server.endpoint;
+  while (base.endsWith('/')) base = base.slice(0, -1);
+  return `${base}${base.endsWith('/v1') && path.startsWith('/v1/') ? path.slice(3) : path}`;
+}
+
+/** HTTP refusals and completed Desktop jobs use the same memory-override contract. */
+function throwRemoteError(detail: string, message: string): never {
+  const marker = 'OFFGRID_IMAGE_MEMORY_LIMIT:';
+  let code: unknown;
+  try {
+    const body = JSON.parse(detail) as { error?: { code?: unknown }; code?: unknown };
+    code = body.error?.code ?? body.code;
+  } catch { /* Plain-text failures can still carry the memory marker. */ }
+  if (code === 'OFFGRID_IMAGE_MEMORY_LIMIT' || message.includes(marker)) {
+    throw Object.assign(new OverridableMemoryError(message.replace(marker, '').trim()), { remote: true });
+  }
+  throw new Error(message);
+}
+
+async function request<T>(
+  input: {
+    server: RemoteServer;
+    path: string;
+    init: RequestInit;
+    signal?: AbortSignal;
+  },
+  consume: (response: Response) => Promise<T>,
+): Promise<T> {
+  const { server, path, init, signal } = input;
+  const controller = new AbortController();
+  // An async image submission must receive its ID before it can cancel the Desktop job.
+  const needsRequestId = server.modelManagement === 'offgrid-desktop-v1' &&
+    path === '/v1/images/generations' && init.method === 'POST';
+  let sent = false;
+  let responseTimer: ReturnType<typeof setTimeout> | undefined;
+  const abort = () => {
+    if (!needsRequestId || !sent) controller.abort();
+  };
+  signal?.addEventListener('abort', abort, { once: true });
+  if (signal?.aborted) abort();
+  try {
+    const apiKey = await remoteServerManager.getApiKey(server.id);
+    if (controller.signal.aborted) throw new Error('Remote request cancelled');
+    sent = true;
+    if (needsRequestId) responseTimer = setTimeout(() => controller.abort(), 30000);
+    const response = await fetch(endpoint(server, path), {
+      ...init,
+      headers: {
+        Accept: 'application/json',
+        ...init.headers,
+        ...remoteAuthorizationHeaders(server.endpoint, apiKey),
+      },
+      signal: controller.signal,
+      redirect: REMOTE_FETCH_REDIRECT_POLICY,
+    });
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '');
+      const message = remoteHttpErrorMessage(detail, response.status);
+      throwRemoteError(detail, message);
+    }
+    // Keep caller cancellation attached until the response body is
+    // consumed. A successful header is not a completed image/audio transfer.
+    return await consume(response);
+  } catch (error) {
+    if (needsRequestId && sent && signal?.aborted) {
+      logger.warn('[RemoteImage] no Desktop request ID received; remote cancellation is unconfirmed:', error);
+    }
+    if (needsRequestId && controller.signal.aborted && !signal?.aborted) {
+      throw new Error('Desktop image request timed out');
+    }
+    if (controller.signal.aborted) throw new Error('Remote request cancelled');
+    throw error;
+  } finally {
+    if (responseTimer) clearTimeout(responseTimer);
+    signal?.removeEventListener('abort', abort);
+  }
+}
+
+function requiredModel(
+  server: RemoteServer,
+  kind: keyof RemoteMediaModelIds,
+): string {
+  const model = server.mediaModels?.[kind]?.trim();
+  if (!model) throw new Error(`No remote ${kind} model is configured`);
+  return model;
+}
+
+/** Thin OpenAI-compatible adapters. The server record owns every endpoint and model choice. */
+export const remoteMediaRuntime = {
+  async generateImage(
+    server: RemoteServer,
+    input: { prompt: string; size?: string },
+    options: RemoteMediaRequestOptions = {},
+  ): Promise<RemoteImageResult> {
+    const openRouter = new URL(server.endpoint).hostname === 'openrouter.ai';
+    const desktop = server.modelManagement === 'offgrid-desktop-v1';
+    type ImagePayload = {
+      data?: Array<{ b64_json?: string; url?: string }>;
+      choices?: Array<{ message?: { images?: Array<{ image_url?: { url?: string } }> } }>;
+    };
+    const payload = await request({
+      server,
+      path: openRouter ? '/v1/chat/completions' : '/v1/images/generations',
+      init: {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(openRouter
+          ? {
+              model: requiredModel(server, 'image'),
+              messages: [{ role: 'user', content: input.prompt }],
+              modalities: ['image', 'text'],
+              stream: false,
+            }
+          : {
+              model: requiredModel(server, 'image'),
+              prompt: input.prompt,
+              size: input.size ?? '1024x1024',
+              response_format: 'b64_json',
+              ...(desktop ? { async: true } : {}),
+              ...(options.override ? { allow_unsafe_memory_override: true } : {}),
+            }),
+      },
+      signal: options.signal,
+    }, response => response.json() as Promise<ImagePayload & { request_id?: string }>);
+    let result: ImagePayload = payload;
+    if (desktop && payload.request_id) {
+      const requestId = payload.request_id;
+      let cancellation: Promise<void> | undefined;
+      const cancelDesktopRequest = () => {
+        if (cancellation) return;
+        const cancelController = new AbortController();
+        const timeout = setTimeout(() => cancelController.abort(), 30000);
+        cancellation = request({
+          server,
+          path: `/v1/requests/${encodeURIComponent(requestId)}`,
+          init: { method: 'DELETE' },
+          // The caller's signal is already aborted. Cleanup needs a fresh request.
+          signal: cancelController.signal,
+        }, response => response.json() as Promise<{ cancelled: boolean; status: string }>)
+          .then(state => {
+            if (!state.cancelled) {
+              logger.log('[RemoteImage] Desktop request was not cancelled:', requestId, state.status);
+            }
+          })
+          .catch(error => logger.warn('[RemoteImage] could not confirm Desktop cancellation:', error))
+          .finally(() => clearTimeout(timeout));
+      };
+      options.signal?.addEventListener('abort', cancelDesktopRequest, { once: true });
+      if (options.signal?.aborted) cancelDesktopRequest();
+      try {
+        while (true) {
+          if (options.signal?.aborted) throw new Error('Remote request cancelled');
+          const state = await request({
+            server,
+            path: `/v1/requests/${encodeURIComponent(payload.request_id)}`,
+            init: { method: 'GET' },
+            signal: options.signal,
+          }, response => response.json() as Promise<{
+            status: string;
+            result?: ImagePayload;
+            error?: { message?: string; code?: string };
+            progress?: { step: number; total: number };
+          }>);
+          if (state.progress) options.onImageProgress?.(state.progress.step, state.progress.total);
+          if (options.signal?.aborted) throw new Error('Remote request cancelled');
+          if (state.status === 'completed') {
+            result = state.result ?? {};
+            break;
+          }
+          if (state.status === 'failed') {
+            throwRemoteError(JSON.stringify(state), state.error?.message ?? 'Remote image generation failed');
+          }
+          await new Promise<void>((resolve, reject) => {
+            const timer = setTimeout(() => {
+              options.signal?.removeEventListener('abort', abort);
+              resolve();
+            }, 1000);
+            const abort = () => {
+              clearTimeout(timer);
+              reject(new Error('Remote request cancelled'));
+            };
+            options.signal?.addEventListener('abort', abort, { once: true });
+          });
+        }
+      } finally {
+        options.signal?.removeEventListener('abort', cancelDesktopRequest);
+        if (cancellation) await cancellation;
+      }
+    }
+    const image = result.data?.[0];
+    const imageUrl = image?.url ?? result.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+    if (!image?.b64_json && !imageUrl) throw new Error('Remote server returned no image');
+    return { base64: image?.b64_json, url: imageUrl };
+  },
+
+  async transcribe(
+    server: RemoteServer,
+    input: { fileUri: string; language?: string },
+    options: RemoteMediaRequestOptions = {},
+  ): Promise<string> {
+    const body = new FormData();
+    body.append('model', requiredModel(server, 'transcription'));
+    if (input.language) body.append('language', input.language);
+    body.append('file', {
+      uri: input.fileUri,
+      name: 'recording.wav',
+      type: 'audio/wav',
+    } as unknown as Blob);
+    const payload = await request({
+      server,
+      path: '/v1/audio/transcriptions',
+      init: { method: 'POST', body },
+      signal: options.signal,
+    }, response => response.json() as Promise<{ text?: unknown }>);
+    if (typeof payload.text !== 'string') {
+      throw new TypeError('Remote server returned no transcript');
+    }
+    return payload.text.trim();
+  },
+
+  async synthesizeVoice(
+    server: RemoteServer,
+    input: { text: string; voice?: string },
+    options: RemoteMediaRequestOptions = {},
+  ): Promise<RemoteVoiceResult> {
+    const openRouter = new URL(server.endpoint).hostname === 'openrouter.ai';
+    const voice = input.voice || (openRouter
+      ? (await remoteMediaRuntime.listVoices(server, options))[0]
+      : undefined);
+    if (openRouter && !voice) throw new Error('This remote model has no available speakers.');
+    return request({
+      server,
+      path: '/v1/audio/speech',
+      init: {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: requiredModel(server, 'voice'),
+          input: input.text,
+          ...(voice ? { voice } : {}),
+          ...(openRouter ? { response_format: 'mp3' } : {}),
+        }),
+      },
+      signal: options.signal,
+    }, async response => ({
+      audio: await response.arrayBuffer(),
+      contentType: response.headers.get('content-type') ?? 'audio/mpeg',
+    }));
+  },
+
+  async listVoices(server: RemoteServer, options: RemoteMediaRequestOptions = {}): Promise<string[]> {
+    try {
+      const modelId = requiredModel(server, 'voice');
+      const catalog = await request({
+        server,
+        path: '/v1/models?output_modalities=speech',
+        init: { method: 'GET' },
+        signal: options.signal,
+      }, response => response.json() as Promise<{
+        data?: Array<{ id?: string; supported_voices?: unknown; voices?: unknown }>;
+      }>);
+      const model = catalog.data?.find(entry => entry.id === modelId);
+      const listed = model?.supported_voices ?? model?.voices;
+      if (Array.isArray(listed)) {
+        return listed.filter((voice): voice is string => typeof voice === 'string');
+      }
+    } catch (error) {
+      if (options.signal?.aborted) throw error;
+    }
+    const payload = await request({
+      server,
+      path: '/v1/audio/voices',
+      init: { method: 'GET' },
+      signal: options.signal,
+    }, response => response.json() as Promise<{ voices?: unknown }>);
+    return Array.isArray(payload.voices)
+      ? payload.voices.filter((voice): voice is string => typeof voice === 'string')
+      : [];
+  },
+};
