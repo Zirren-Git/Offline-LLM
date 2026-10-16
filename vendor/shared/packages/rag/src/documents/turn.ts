@@ -248,6 +248,7 @@ export class DocumentTurnService {
 
     const sourcesOut: CitedSource[] = chosen.map((passage, index) => ({
       id: `S${index + 1}`,
+      position: passage.position,
       documentId: passage.documentId,
       name: passage.name,
       page: passage.page,

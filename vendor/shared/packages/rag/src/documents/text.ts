@@ -143,6 +143,7 @@ export function searchBlock(
     );
     sources.push({
       id,
+      position: passage.position,
       documentId: passage.documentId,
       name: passage.name,
       page: passage.page,

@@ -239,7 +239,7 @@ const DocumentStatus: React.FC<{ documentId: string; style: any }> = ({ document
   let label: string;
   if (progress.phase === 'failed') label = "Couldn't read";
   else if (progress.phase === 'ready')
-    label = `${progress.pageCount.toLocaleString()} page${progress.pageCount === 1 ? '' : 's'}`;
+    label = `${(progress.pageCount ?? 0).toLocaleString()} page${progress.pageCount === 1 ? '' : 's'}`;
   else {
     const percent = progress.total ? Math.min(99, Math.round((progress.done / progress.total) * 100)) : 0;
     label = `${PHASE_LABEL[progress.phase]} ${percent}%`;

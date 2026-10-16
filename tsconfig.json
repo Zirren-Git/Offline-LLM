@@ -4,7 +4,12 @@
     "types": ["jest", "node"],
     "paths": {
       "@offgrid/core/*": ["./src/*"],
-      "@offgrid/pro/*": ["./pro/*"],
+      "@offgrid/rag/documents": ["./vendor/shared/packages/rag/src/documents/index.ts"],
+      "@offgrid/rag": ["./vendor/shared/packages/rag/src/index.ts"],
+      "@offgrid/models": ["./vendor/shared/packages/models/src/index.ts"],
+      "@offgrid/sync": ["./vendor/shared/packages/sync/src/index.ts"],
+      "@offgrid/speech": ["./vendor/shared/packages/speech/src/index.ts"],
+      "@offgrid/ui": ["./vendor/shared/packages/ui/src/index.ts"],
       "react-native-fs": ["./src/shims/react-native-fs.ts"]
     },
   },

@@ -96,6 +96,8 @@ export class DocumentIngestService {
     return run;
   }
 
+  isRunning(id: string): boolean { return this.inFlight.has(id); }
+
   private report(progress: DocumentProgress): void {
     try {
       this.deps.onProgress?.(progress);
@@ -186,7 +188,7 @@ export class DocumentIngestService {
       embeddedCount: embedded,
       lastUsedAt: Date.now(),
     });
-    this.report({ id: source.id, phase: 'ready', done: chunks.length, total: chunks.length });
+    this.report({ id: source.id, phase: 'ready', pageCount: pages.length, done: chunks.length, total: chunks.length });
     return store.getDocument(source.id);
   }
 

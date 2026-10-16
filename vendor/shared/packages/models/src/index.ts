@@ -123,11 +123,12 @@ export function toolResultCharBudget(input: {
 
 /** Characters the prompt currently occupies (messages + tool schemas), for budgeting. */
 export function toolPromptChars(
-  messages: Array<{ role?: string; content?: string | null }>,
-  tools: unknown[] = [],
+  messages: readonly unknown[],
+  tools: readonly unknown[] = [],
 ): number {
   let chars = 0;
-  for (const message of messages) {
+  for (const value of messages) {
+    const message = value as { role?: string; content?: string | null };
     chars += (message.role?.length ?? 0) + (message.content?.length ?? 0) + 8;
   }
   for (const tool of tools) {

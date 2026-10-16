@@ -475,7 +475,7 @@ const WHISPER_LANGUAGES: TranscriptionLanguage[] = [
 /** Languages a transcription engine offers. The model decides what it can actually hear. */
 export function transcriptionLanguages(
   _engine: string,
-  _modelId?: string,
+  _modelId?: string | null,
 ): TranscriptionLanguage[] {
   return WHISPER_LANGUAGES.map(language => ({ ...language }));
 }

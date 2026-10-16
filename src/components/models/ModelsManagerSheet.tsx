@@ -24,7 +24,6 @@ type RowDef = { type: ModelRowType; icon: string; label: string };
 const ROWS: RowDef[] = [
   { type: 'text', icon: 'message-square', label: 'Text' },
   { type: 'image', icon: 'image', label: 'Image' },
-  { type: 'voice', icon: 'volume-2', label: 'Voice' },
   { type: 'speech', icon: 'mic', label: 'Speech' },
 ];
 

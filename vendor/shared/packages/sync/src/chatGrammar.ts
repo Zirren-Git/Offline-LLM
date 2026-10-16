@@ -33,9 +33,8 @@ export const TOOL_CALL_OPENERS: string[] = [
   '<|tool_call>',
   '<tool_call>',
   '<tool_call:',
-  '<tool_call>',
 ];
-export const TOOL_CALL_CLOSERS: string[] = ['<tool_call|>', '</tool_call>', '</tool_call>'];
+export const TOOL_CALL_CLOSERS: string[] = ['<tool_call|>', '</tool_call>'];
 
 /** XML-style tool-call markup (`<function=NAME>…<parameter=NAME>…</function>`). */
 export const XML_TOOL_CALL_FUNCTION_MARKER = '<function=';
@@ -128,13 +127,13 @@ function escapeRegExp(text: string): string {
 const TOOL_BLOCK_PATTERNS: RegExp[] = TOOL_CALL_OPENERS.map(
   opener =>
     new RegExp(
-      String.raw`${escapeRegExp(opener)}[\s\S]*?(?:${TOOL_CALL_CLOSERS.map(escapeRegExp).join('|')}|$)`,
+      String.raw`${escapeRegExp(opener)}[\s\S]*?(?:${TOOL_CALL_CLOSERS.map(escapeRegExp).join('|')}|$)\s*`,
       'g',
     ),
 );
 
 const XML_FUNCTION_BLOCK_PATTERN = new RegExp(
-  String.raw`${escapeRegExp(XML_TOOL_CALL_FUNCTION_MARKER)}[\s\S]*?<\/function>`,
+  String.raw`${escapeRegExp(XML_TOOL_CALL_FUNCTION_MARKER)}[\s\S]*?(?:<\/function>|$)`,
   'gi',
 );
 

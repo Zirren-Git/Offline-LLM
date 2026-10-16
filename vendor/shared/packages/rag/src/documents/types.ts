@@ -76,7 +76,7 @@ export interface KeywordHit {
   documentId: string;
   position: number;
   /** bm25 rank; lower is better. */
-  rank: number;
+  score: number;
 }
 
 export interface DocumentIndexStore {
@@ -113,6 +113,7 @@ export interface ProjectDocumentsPort {
 export interface DocumentProgress {
   id: string;
   phase: 'reading' | 'ocr' | 'indexing' | 'ready' | 'failed';
+  pageCount?: number;
   done: number;
   total: number;
   error?: string;
@@ -120,6 +121,7 @@ export interface DocumentProgress {
 
 /** A passage the turn numbered so an answer can cite it as [S#]. */
 export interface CitedSource {
+  position: number;
   id: string;
   documentId: string;
   name: string;
