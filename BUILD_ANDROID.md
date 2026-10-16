@@ -28,7 +28,7 @@ Expect Node `v22.x` and Java `17.x`. If `JAVA_HOME` points to a different Java i
 
 ### Option A: download the pre-release ZIP
 
-Download **Offline-LLM-source-v0.0.114-local-build.1.zip** from the GitHub pre-release assets and extract it. Open a terminal in its `Offline-LLM/` folder, the one containing `package.json`, `android/` and `vendor/`.
+Download **Source code (zip)** from the GitHub pre-release page and extract it. Open a terminal in the extracted project folder (its name may include the release tag), the one containing `package.json`, `android/` and `vendor/`.
 
 On Windows, extract into a short local path such as `C:\src\Offline-LLM` to reduce native build path-length problems. Avoid OneDrive/network folders.
 
