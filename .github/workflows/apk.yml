@@ -4,10 +4,11 @@ on:
     branches: ['arena/e6547419-offline-llm']
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
+  checks: write
 jobs:
   apk:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
@@ -15,19 +16,62 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
-      - name: Free disk space
-        run: sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android/sdk/ndk
-      - run: npm ci
-      - name: Install Android toolchain
-        run: sdkmanager 'ndk;27.1.12297006' 'cmake;3.22.1'
-      - name: Build standalone signed APK (ARM64)
-        working-directory: android
-        run: ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon --max-workers=2
+      # Hosted Ubuntu already includes the SDK command-line tools. Use those
+      # rather than a second setup action that replaces the runner's SDK.
+      - name: Install toolchain and build standalone ARM64 APK
+        id: build
+        shell: bash
+        run: |
+          set -o pipefail
+          bash -euo pipefail <<'BUILD' 2>&1 | tee "$RUNNER_TEMP/apk-build.log"
+          trap 'echo "BUILD FAILED at line $LINENO (exit $?)"' ERR
+          echo '=== SDK environment ==='
+          : "${ANDROID_HOME:?Hosted runner has no ANDROID_HOME}"
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$SDKMANAGER"
+          "$SDKMANAGER" --version
+          echo '=== Free disk space ==='
+          sudo rm -rf /usr/share/dotnet /opt/ghc "$ANDROID_HOME/ndk"
+          df -h .
+          echo '=== Install locked npm dependencies ==='
+          npm ci
+          echo '=== Install pinned Android SDK components ==='
+          python3 -c "print('y\n' * 200)" > "$RUNNER_TEMP/sdk-license-answers.txt"
+          "$SDKMANAGER" --licenses < "$RUNNER_TEMP/sdk-license-answers.txt"
+          "$SDKMANAGER" 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.1.12297006' 'cmake;3.22.1'
+          echo '=== Build ARM64 release ==='
+          cd android
+          ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon --max-workers=2 --stacktrace
+          BUILD
+      # Log download hosts are not reachable from the coding sandbox. Expose the
+      # tail through the Checks API too, without requiring a user to copy errors.
+      - name: Publish build diagnostics
+        continue-on-error: true
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+        with:
+          script: |
+            const fs = require('fs');
+            const log = `${process.env.RUNNER_TEMP}/apk-build.log`;
+            const text = fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : 'Build did not reach the diagnostic logging step.';
+            await github.rest.checks.create({
+              ...context.repo,
+              name: 'Android build diagnostics',
+              head_sha: context.sha,
+              status: 'completed',
+              conclusion: process.env.BUILD_OUTCOME === 'success' ? 'success' : 'failure',
+              output: {
+                title: `ARM64 build: ${process.env.BUILD_OUTCOME}`,
+                summary: 'Last portion of the build log. Full output is in the workflow run.',
+                text: '```text\n' + text.slice(-50000) + '\n```',
+              },
+            });
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
@@ -35,3 +79,13 @@ jobs:
           path: android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           compression-level: 0
+      - name: Publish installable test APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp android/app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/Offline-LLM-arm64.apk"
+          gh release create "v0.0.114-apk.${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}" \
+            "$RUNNER_TEMP/Offline-LLM-arm64.apk" \
+            --target "$GITHUB_SHA" --prerelease \
+            --title 'Offline-LLM ARM64 APK (experimental)' \
+            --notes 'Standalone ARM64 Android APK. Native compilation succeeded; device behavior has not been verified. Signed with the included public debug key for personal testing, not a private production identity. Model weights are not included. Back up important data before replacing an existing installation with a different signing identity.'
