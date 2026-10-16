@@ -4,51 +4,71 @@ This source pre-release can be built on your own Windows, macOS or Linux compute
 
 **Status:** the JavaScript release bundle, production TypeScript and 66 focused tests passed in the preparation environment. The native Android build has **not** been completed or tested on a device: GitHub refused to start its runner because of an account billing restriction, and the preparation sandbox cannot reach Android dependency servers. Treat this as an experimental source pre-release, not a verified APK release.
 
-## Windows: use the batch files (recommended)
+## Windows: separate, self-contained batch downloads
 
-Extract the **whole source archive** to a short local path such as `C:\src\Offline-LLM`. Keep `scripts/`, `vendor/`, `android/` and the other source files together; the batch files are not standalone downloads.
+Use the **standalone `install-build-dependencies.bat` and `build-apk.bat` downloads** from local-build.4 or newer. They include their own PowerShell implementation: no companion `.ps1` files are needed. You may keep these two files in Downloads, outside the source folder. The separate Windows build-tools ZIP also contains just the two launchers and usage instructions, not the app source.
 
-1. Double-click **`install-build-dependencies.bat`** in the project folder.
-   - Uses Windows Package Manager (`winget`) to install Node.js 22 LTS and Temurin JDK 17 **if a suitable installation is not found**. It keeps an existing newer Node.js installation (22.13+ is required).
-   - Downloads the official Android command-line tools if missing. **Android Studio itself is optional for this automated route.**
-   - Asks you to review Android SDK licenses, then installs API 36, Build-Tools 36.0.0, NDK 27.1.12297006, CMake 3.22.1 and Platform-Tools.
-   - Writes the SDK location into the ignored `android/local.properties`, then runs `npm ci`, including the native patches.
-2. When setup succeeds, double-click **`build-apk.bat`**.
-   - Builds one ARM64 release APK and prints its path and SHA-256 hash on success.
-   - Output: **`android\app\build\outputs\apk\release\app-release.apk`**.
+The repository is private, so the scripts do **not** download source anonymously, request credentials, or embed a GitHub token. You still need to download/extract the app's **Source code (zip)** using your browser. Prefer a short local path such as `C:\src\Offline-LLM`.
 
-These scripts are for **x64 Windows 10/11** with Windows PowerShell 5.1+ (included with Windows). Install/update Microsoft's **App Installer** if `winget` is unavailable, or install Node/JDK manually and rerun setup. Tool installers can request administrator approval; review the prompts. Internet and substantial free disk space are required. The first native build can take a long time.
+1. Double-click the **new `install-build-dependencies.bat`**. Confirm its banner says **`2026.10.16.4`**.
+   - If it cannot find the project beside the batch file or at a previously remembered location, paste the full extracted source folder path when asked. Choose the folder containing `package.json`, `android/` and `vendor/`, not the `android` subfolder or the ZIP file itself.
+   - Uses Windows Package Manager (`winget`) to install Node.js 22 LTS and Temurin JDK 17 if suitable tools are missing. Existing Node.js 22.13+ is reused.
+   - Installs official Android command-line tools if needed. Android Studio is optional for this route.
+   - Prompts for SDK licenses, installs API 36, Build-Tools 36.0.0, NDK 27.1.12297006, CMake 3.22.1 and Platform-Tools, then runs `npm ci` with native patches.
+2. When setup succeeds, double-click the **new `build-apk.bat`**. It remembers the source folder from setup, builds one ARM64 release APK and prints its path and SHA-256 hash.
 
-The SDK location is taken from `android/local.properties`, then `ANDROID_HOME` / `ANDROID_SDK_ROOT`, falling back to `%LOCALAPPDATA%\Android\Sdk`. Existing SDK components can be reused. The scripts set tool paths for their own process; you do not need to restart the computer. If a manually installed tool still cannot be found, open a new terminal or set `JAVA_HOME` as explained below.
+Expected output under the selected source folder:
 
-Both launchers keep the window open at the end so you can read errors. From Command Prompt, you can skip that final pause:
+```text
+android\app\build\outputs\apk\release\app-release.apk
+```
+
+### Errors and recovery
+
+No script can recover from every possible Windows, network, hardware or dependency error. These launchers use bounded SDK download/extraction retries, verify SDK files, stage copies on the SDK's own drive and preserve incomplete installations before replacing them. They stop with a nonzero exit code rather than report success after a failed installation/build.
+
+For the reported missing `unpacked\cmdline-tools\bin` error, **run the newly downloaded batch file**, not a shortcut to the old one. These standalone files never load the old PowerShell helpers from your source checkout. The version banner identifies the implementation being run. Do not manually create the missing TEMP directory.
+
+On failure, read the named step and diagnostic log path. Logs and the remembered source path are stored in:
+
+```text
+%LOCALAPPDATA%\Offline-LLM\windows-build
+```
+
+Review/redact logs before sharing them: they include personal paths and build-tool output. If Windows blocks PowerShell or denies access to this directory, the bootstrap prints an error; permissions or organizational policy must be fixed manually. Antivirus quarantine, insufficient disk space, SDK license rejection and unavailable download servers cannot be solved by ignoring the error.
+
+Incomplete existing `cmdline-tools/latest` files are preserved as `latest.incomplete-<unique-id>`. Complete tools are reused. An interrupted setup can be rerun; cleanup failures must not hide the actual error. Installation of Node/JDK can request administrator approval. The SDK location is taken from `android/local.properties`, then `ANDROID_HOME` / `ANDROID_SDK_ROOT`, falling back to `%LOCALAPPDATA%\Android\Sdk`.
+
+These launchers target **x64 Windows 10/11** and Windows PowerShell 5.1+. Install/update Microsoft's App Installer if `winget` is missing, or install Node/JDK manually. Internet and at least 30 GB free disk space are recommended. Native builds can take a long time.
+
+Both windows remain open at the end. From Command Prompt, add `--no-pause` to skip the final pause (SDK license prompts remain interactive). From PowerShell, prefix the filename with `.\`:
 
 ```bat
 install-build-dependencies.bat --no-pause
 build-apk.bat --no-pause
 ```
 
-From PowerShell, prefix those commands with `.\`. They return a nonzero exit code on failure. SDK license prompts are still interactive; `--no-pause` does not accept licenses automatically.
+To explicitly select a different project, set `OFFLINE_LLM_SOURCE_DIR` to its full path before launching, or place the batch files beside that project's `package.json`.
 
-**Signing warning:** unless you configure your own keystore (see below), the APK uses the included public debug signing key. Do not treat it as a trusted production release.
+**Signing warning:** the APK uses the included public debug key unless you configure your own keystore (see below). Do not treat it as a trusted production signing identity.
 
-The batch files delegate to `scripts/windows/android-build.ps1`. Their syntax has been checked, but **they have not been executed on Windows**, and the native build is still unverified. The manual instructions below are also available if your toolchain needs adjustments.
+### Validation for maintainers
 
-### Updating after a missing `unpacked\cmdline-tools\bin` error
+The launchers are generated from the PowerShell sources so embedded copies cannot silently diverge:
 
-Download the **v0.0.114-local-build.3 or newer source ZIP**, extract the whole project, and rerun `install-build-dependencies.bat`, then `build-apk.bat`. The launcher uses both `scripts/windows/android-build.ps1` and `scripts/windows/android-sdk-tools.ps1`; replacing only the `.bat` file is not enough.
+```text
+python scripts/windows/package-standalone.py
+python scripts/windows/package-standalone.py --check
+python scripts/windows/tests/test_standalone.py
+```
 
-The installer now uses .NET ZIP extraction, verifies the manager, its supporting library and package metadata, and copies the tools through a staging directory inside the SDK. This avoids moving a directory tree directly between TEMP and an SDK on another drive. It also tolerates a wrapper directory inside the downloaded ZIP.
-
-If an earlier attempt left an incomplete `cmdline-tools/latest` directory, the installer preserves it as `latest.incomplete-<unique-id>` before installing the verified replacement. A complete existing installation is reused. Cleanup errors are warnings and cannot replace the original extraction/copy error. You do not need to create the missing temporary `bin` directory yourself.
-
-For maintainers, filesystem regression fixtures can be run without downloading SDK tools or invoking the full installer:
+Filesystem regression fixtures can be run on Windows without downloading SDK tools:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\tests\android-sdk-tools.test.ps1
 ```
 
-Optionally add `-SdkDestinationRoot D:\Temp` (an existing writable directory on another drive) to exercise copying from TEMP to a different SDK volume. These fixture tests have been syntax-checked here, but have not been executed on Windows in the preparation sandbox.
+Optionally add `-SdkDestinationRoot D:\Temp` (an existing writable directory on another drive) to test copying from TEMP to a different SDK volume. Packaging and syntax checks passed in the preparation environment; **Windows execution and the native Android build remain unverified**.
 
 ## 1. Install the prerequisites
 
@@ -81,7 +101,7 @@ On Windows, extract into a short local path such as `C:\src\Offline-LLM` to redu
 ### Option B: clone the release tag
 
 ```sh
-git clone --branch v0.0.114-local-build.3 --depth 1 https://github.com/Zirren-Git/Offline-LLM.git
+git clone --branch v0.0.114-local-build.4 --depth 1 https://github.com/Zirren-Git/Offline-LLM.git
 cd Offline-LLM
 ```
 

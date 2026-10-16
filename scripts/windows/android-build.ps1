@@ -4,16 +4,59 @@
 param(
     [Parameter(Mandatory = $true)]
     [ValidateSet('dependencies', 'build')]
-    [string]$Mode
+    [string]$Mode,
+    [string]$SourceDirectory = '',
+    [string]$LauncherDirectory = ''
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'android-sdk-tools.ps1')
-$Repository = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
+$script:ToolVersion = '2026.10.16.4'
+$script:CurrentStep = 'startup'
+$Repository = $null
+$StateDirectory = Join-Path $env:LOCALAPPDATA 'Offline-LLM\windows-build'
 
 function Write-Step([string]$Text) {
+    $script:CurrentStep = $Text
     Write-Host "`n== $Text ==" -ForegroundColor Cyan
+}
+
+function Test-SourceDirectory([string]$Directory) {
+    try {
+        if (-not $Directory -or -not (Test-Path -LiteralPath $Directory -PathType Container)) { return $false }
+        foreach ($relative in @('package-lock.json', 'android\gradlew.bat', 'vendor\shared\packages\models\src\index.ts')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $Directory $relative) -PathType Leaf)) { return $false }
+        }
+        $packageFile = Join-Path $Directory 'package.json'
+        if (-not (Test-Path -LiteralPath $packageFile -PathType Leaf)) { return $false }
+        $package = Get-Content -LiteralPath $packageFile -Raw | ConvertFrom-Json
+        return ($package.name -eq 'offgrid-mobile')
+    } catch { return $false }
+}
+
+function Resolve-SourceDirectory {
+    $saved = Join-Path $StateDirectory 'source-path.txt'
+    $candidates = @($SourceDirectory, $env:OFFLINE_LLM_SOURCE_DIR, $LauncherDirectory,
+        [string](Get-Location), (Join-Path $PSScriptRoot '..\..'))
+    if (Test-Path -LiteralPath $saved) {
+        try { $candidates += ([System.IO.File]::ReadAllText($saved).Trim()) }
+        catch { Write-Warning 'Could not read the remembered source path.' }
+    }
+    foreach ($candidate in $candidates) {
+        if (Test-SourceDirectory $candidate) { return [System.IO.Path]::GetFullPath($candidate) }
+    }
+    Write-Host 'These standalone batch files contain their own installer code.'
+    Write-Host 'To compile the app, you still need an extracted Offline-LLM source ZIP (local-build.3 or newer).'
+    Write-Host 'Choose the folder containing package.json, android and vendor. No GitHub login is requested.'
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        $answer = Read-Host 'Paste the full source folder path (blank to cancel)'
+        if (-not $answer) { throw 'Cancelled: no source directory selected. Download/extract the source ZIP, then retry.' }
+        $answer = $answer.Trim().Trim('"')
+        if (Test-SourceDirectory $answer) { return [System.IO.Path]::GetFullPath($answer) }
+        Write-Warning 'Not a complete Offline-LLM source folder. Select the extracted project folder, not its ZIP or android subfolder.'
+    }
+    throw 'Could not locate the source after three attempts. Set OFFLINE_LLM_SOURCE_DIR to its full path, or put these batch files beside package.json.'
 }
 
 function Refresh-ToolPath {
@@ -138,24 +181,34 @@ function Install-CommandLineTools([string]$Sdk) {
     New-Item -ItemType Directory -Path $temporary | Out-Null
     try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        $zip = Join-Path $temporary 'tools.zip'
-        $oldProgress = $ProgressPreference
-        try {
-            $ProgressPreference = 'SilentlyContinue'
-            Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
-        } finally {
-            $ProgressPreference = $oldProgress
+        $source = $null
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            $attemptDirectory = Join-Path $temporary ("attempt-$attempt")
+            New-Item -ItemType Directory -Path $attemptDirectory | Out-Null
+            $zip = Join-Path $attemptDirectory 'tools.zip'
+            $oldProgress = $ProgressPreference
+            try {
+                Write-Step "Downloading and verifying SDK tools (attempt $attempt of 3)"
+                $ProgressPreference = 'SilentlyContinue'
+                Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing -TimeoutSec 300
+                $source = Expand-AndroidCommandLineTools $zip (Join-Path $attemptDirectory 'unpacked')
+                break
+            } catch {
+                if ($attempt -eq 3) {
+                    throw "SDK download/extraction failed after 3 attempts. Check network/proxy, antivirus quarantine, permissions and disk space. Details: $($_.Exception.Message)"
+                }
+                Write-Warning "SDK download/extraction attempt $attempt failed: $($_.Exception.Message). Retrying..."
+                Start-Sleep -Seconds (2 * $attempt)
+            } finally { $ProgressPreference = $oldProgress }
         }
-        Write-Step 'Extracting and verifying Android command-line tools'
-        $source = Expand-AndroidCommandLineTools $zip (Join-Path $temporary 'unpacked')
+        if (-not $source) { throw 'No verified Android command-line tools were extracted.' }
         Write-Step 'Copying verified tools into the Android SDK'
         Install-AndroidCommandLineToolsDirectory $source $Sdk
     } finally {
-        # Only remove the uniquely named temporary directory this invocation made.
-        if (Test-Path -LiteralPath $temporary) {
-            try { Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction Stop }
-            catch { Write-Warning "Could not remove temporary SDK download directory: $temporary" }
-        }
+        # Do not mask the real error if antivirus or permissions block cleanup.
+        try {
+            if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction Stop }
+        } catch { Write-Warning "Could not remove temporary SDK download directory: $temporary" }
     }
 }
 
@@ -176,9 +229,30 @@ function Write-LocalProperties([string]$Sdk) {
     [System.IO.File]::WriteAllLines($properties, [string[]]$lines, (New-Object System.Text.UTF8Encoding($false)))
 }
 
+function Assert-SdkComponents([string]$Sdk) {
+    foreach ($relative in @('platform-tools\adb.exe', 'platforms\android-36\android.jar', 'build-tools\36.0.0\aapt2.exe', 'ndk\27.1.12297006\source.properties', 'cmake\3.22.1\bin\cmake.exe')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $Sdk $relative) -PathType Leaf)) {
+            throw "Missing Android component: $relative. Run the NEW install-build-dependencies.bat. If setup already ran, check rejected SDK licenses or failed downloads in its log."
+        }
+    }
+}
+
 $previousDirectory = Get-Location
 $result = 0
+$transcribing = $false
+$log = $null
 try {
+    New-Item -ItemType Directory -Path $StateDirectory -Force | Out-Null
+    $log = Join-Path $StateDirectory ((Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N').Substring(0, 8) + '.log')
+    try { Start-Transcript -LiteralPath $log | Out-Null; $transcribing = $true }
+    catch { Write-Warning "Could not start the log: $($_.Exception.Message)" }
+    Write-Host "Offline-LLM standalone Windows tools $script:ToolVersion ($Mode)" -ForegroundColor Cyan
+    Write-Host 'No source-folder PowerShell helpers are loaded by the standalone batch files.'
+    Write-Step 'Locating the app source'
+    $Repository = Resolve-SourceDirectory
+    Write-Host "Source: $Repository"
+    try { [System.IO.File]::WriteAllText((Join-Path $StateDirectory 'source-path.txt'), $Repository) }
+    catch { Write-Warning 'Could not remember the source path; you may be asked again next time.' }
     Set-Location -LiteralPath $Repository
     if (-not (Test-Path -LiteralPath (Join-Path $Repository 'package-lock.json'))) {
         throw 'The source folder is incomplete: package-lock.json is missing.'
@@ -190,6 +264,7 @@ try {
         throw 'These launchers target x64 Windows build tools. On Windows ARM64, use the manual guide with a compatible toolchain.'
     }
 
+    Write-Step 'Checking Node.js and npm'
     Refresh-ToolPath
     $node = Find-Node
     if (-not $node -and $Mode -eq 'dependencies') {
@@ -201,6 +276,7 @@ try {
     if (-not $npm) { throw 'npm.cmd was not found. Repair your Node.js installation, then retry.' }
     Write-Host ('Node: ' + (Read-ToolOutput $node '--version').Trim())
 
+    Write-Step 'Checking JDK 17'
     $javaHome = Find-Java17
     if (-not $javaHome -and $Mode -eq 'dependencies') {
         Install-WingetPackage 'EclipseAdoptium.Temurin.17.JDK'
@@ -211,6 +287,7 @@ try {
     $env:Path = "$javaHome\bin;$env:Path"
     Write-Host "JDK: $javaHome"
 
+    Write-Step 'Checking Android SDK location'
     $sdk = Get-SdkDirectory
     $env:ANDROID_HOME = $sdk
     $env:ANDROID_SDK_ROOT = $sdk
@@ -230,17 +307,14 @@ try {
         Write-Step 'Installing Android platform, build tools, NDK and CMake'
         & $manager "--sdk_root=$sdk" 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.1.12297006' 'cmake;3.22.1'
         if ($LASTEXITCODE -ne 0) { throw 'Android SDK installation failed. Check accepted licenses, network access and free disk space.' }
+        Assert-SdkComponents $sdk
         Write-LocalProperties $sdk
         Write-Step 'Installing locked npm dependencies and applying native patches'
         & $npm.Source ci
         if ($LASTEXITCODE -ne 0) { throw 'npm ci failed. Do not ignore failed native patches; fix the reported error before building.' }
         Write-Host "`nSetup complete. Run build-apk.bat next." -ForegroundColor Green
     } else {
-        foreach ($relative in @('platforms\android-36\android.jar', 'build-tools\36.0.0\aapt2.exe', 'ndk\27.1.12297006\source.properties', 'cmake\3.22.1\bin\cmake.exe')) {
-            if (-not (Test-Path -LiteralPath (Join-Path $sdk $relative))) {
-                throw "Missing Android component: $relative. Run install-build-dependencies.bat first."
-            }
-        }
+        Assert-SdkComponents $sdk
         if (-not (Test-Path -LiteralPath (Join-Path $Repository 'node_modules\react-native\package.json'))) {
             throw 'App dependencies are missing. Run install-build-dependencies.bat first.'
         }
@@ -258,9 +332,20 @@ try {
         Write-Host 'This APK targets ARM64 phones. Model weights are not included.'
     }
 } catch {
-    [Console]::Error.WriteLine(('ERROR: ' + $_.Exception.Message))
+    Write-Host ("ERROR during '$script:CurrentStep': " + $_.Exception.Message) -ForegroundColor Red
+    Write-Host ("Tool version: $script:ToolVersion")
+    Write-Host ('Details: ' + $_.Exception.ToString())
+    Write-Host ('Location: ' + $_.ScriptStackTrace)
+    Write-Host 'The operation stopped safely. Do not create the missing TEMP bin folder manually.'
+    Write-Host 'If retrying fails, share the failed step and log after redacting personal paths or private data.'
     $result = 1
 } finally {
-    Set-Location -LiteralPath $previousDirectory
+    try { Set-Location -LiteralPath $previousDirectory }
+    catch { Write-Warning 'Could not restore the original working directory.' }
+    if ($transcribing) {
+        try { Stop-Transcript | Out-Null }
+        catch { Write-Warning 'Could not close the diagnostic transcript.' }
+    }
+    if ($log -and $transcribing) { Write-Host "Diagnostic log: $log" }
 }
 exit $result
