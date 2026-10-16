@@ -34,6 +34,22 @@ From PowerShell, prefix those commands with `.\`. They return a nonzero exit cod
 
 The batch files delegate to `scripts/windows/android-build.ps1`. Their syntax has been checked, but **they have not been executed on Windows**, and the native build is still unverified. The manual instructions below are also available if your toolchain needs adjustments.
 
+### Updating after a missing `unpacked\cmdline-tools\bin` error
+
+Download the **v0.0.114-local-build.3 or newer source ZIP**, extract the whole project, and rerun `install-build-dependencies.bat`, then `build-apk.bat`. The launcher uses both `scripts/windows/android-build.ps1` and `scripts/windows/android-sdk-tools.ps1`; replacing only the `.bat` file is not enough.
+
+The installer now uses .NET ZIP extraction, verifies the manager, its supporting library and package metadata, and copies the tools through a staging directory inside the SDK. This avoids moving a directory tree directly between TEMP and an SDK on another drive. It also tolerates a wrapper directory inside the downloaded ZIP.
+
+If an earlier attempt left an incomplete `cmdline-tools/latest` directory, the installer preserves it as `latest.incomplete-<unique-id>` before installing the verified replacement. A complete existing installation is reused. Cleanup errors are warnings and cannot replace the original extraction/copy error. You do not need to create the missing temporary `bin` directory yourself.
+
+For maintainers, filesystem regression fixtures can be run without downloading SDK tools or invoking the full installer:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\tests\android-sdk-tools.test.ps1
+```
+
+Optionally add `-SdkDestinationRoot D:\Temp` (an existing writable directory on another drive) to exercise copying from TEMP to a different SDK volume. These fixture tests have been syntax-checked here, but have not been executed on Windows in the preparation sandbox.
+
 ## 1. Install the prerequisites
 
 - **Node.js 22 LTS**, including npm. Use Node 22.13 or later in that major version.
@@ -65,7 +81,7 @@ On Windows, extract into a short local path such as `C:\src\Offline-LLM` to redu
 ### Option B: clone the release tag
 
 ```sh
-git clone --branch v0.0.114-local-build.2 --depth 1 https://github.com/Zirren-Git/Offline-LLM.git
+git clone --branch v0.0.114-local-build.3 --depth 1 https://github.com/Zirren-Git/Offline-LLM.git
 cd Offline-LLM
 ```
 

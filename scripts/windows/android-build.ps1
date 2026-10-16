@@ -9,6 +9,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'android-sdk-tools.ps1')
 $Repository = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 
 function Write-Step([string]$Text) {
@@ -117,12 +118,12 @@ function Get-SdkDirectory {
 
 function Find-SdkManager([string]$Sdk) {
     $preferred = Join-Path $Sdk 'cmdline-tools\latest\bin\sdkmanager.bat'
-    if (Test-Path -LiteralPath $preferred) { return $preferred }
+    if (Test-AndroidCommandLineToolsRoot (Split-Path -Parent (Split-Path -Parent $preferred))) { return $preferred }
     $tools = Join-Path $Sdk 'cmdline-tools'
     if (Test-Path -LiteralPath $tools) {
         foreach ($directory in (Get-ChildItem -LiteralPath $tools -Directory | Sort-Object Name -Descending)) {
             $manager = Join-Path $directory.FullName 'bin\sdkmanager.bat'
-            if (Test-Path -LiteralPath $manager) { return $manager }
+            if (Test-AndroidCommandLineToolsRoot $directory.FullName) { return $manager }
         }
     }
     return $null
@@ -145,21 +146,16 @@ function Install-CommandLineTools([string]$Sdk) {
         } finally {
             $ProgressPreference = $oldProgress
         }
-        Expand-Archive -LiteralPath $zip -DestinationPath (Join-Path $temporary 'unpacked')
-        $source = Join-Path $temporary 'unpacked\cmdline-tools'
-        if (-not (Test-Path -LiteralPath (Join-Path $source 'bin\sdkmanager.bat'))) {
-            throw 'Downloaded Android tools did not contain sdkmanager.bat.'
-        }
-        $parent = Join-Path $Sdk 'cmdline-tools'
-        New-Item -ItemType Directory -Path $parent -Force | Out-Null
-        $destination = Join-Path $parent 'latest'
-        if (Test-Path -LiteralPath $destination) {
-            throw "The directory $destination already exists but has no usable sdkmanager. Repair it in Android Studio SDK Manager; this script will not overwrite it."
-        }
-        Move-Item -LiteralPath $source -Destination $destination
+        Write-Step 'Extracting and verifying Android command-line tools'
+        $source = Expand-AndroidCommandLineTools $zip (Join-Path $temporary 'unpacked')
+        Write-Step 'Copying verified tools into the Android SDK'
+        Install-AndroidCommandLineToolsDirectory $source $Sdk
     } finally {
         # Only remove the uniquely named temporary directory this invocation made.
-        Remove-Item -LiteralPath $temporary -Recurse -Force
+        if (Test-Path -LiteralPath $temporary) {
+            try { Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction Stop }
+            catch { Write-Warning "Could not remove temporary SDK download directory: $temporary" }
+        }
     }
 }
 
