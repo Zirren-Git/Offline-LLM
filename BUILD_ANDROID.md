@@ -4,6 +4,36 @@ This source pre-release can be built on your own Windows, macOS or Linux compute
 
 **Status:** the JavaScript release bundle, production TypeScript and 66 focused tests passed in the preparation environment. The native Android build has **not** been completed or tested on a device: GitHub refused to start its runner because of an account billing restriction, and the preparation sandbox cannot reach Android dependency servers. Treat this as an experimental source pre-release, not a verified APK release.
 
+## Windows: use the batch files (recommended)
+
+Extract the **whole source archive** to a short local path such as `C:\src\Offline-LLM`. Keep `scripts/`, `vendor/`, `android/` and the other source files together; the batch files are not standalone downloads.
+
+1. Double-click **`install-build-dependencies.bat`** in the project folder.
+   - Uses Windows Package Manager (`winget`) to install Node.js 22 LTS and Temurin JDK 17 **if a suitable installation is not found**. It keeps an existing newer Node.js installation (22.13+ is required).
+   - Downloads the official Android command-line tools if missing. **Android Studio itself is optional for this automated route.**
+   - Asks you to review Android SDK licenses, then installs API 36, Build-Tools 36.0.0, NDK 27.1.12297006, CMake 3.22.1 and Platform-Tools.
+   - Writes the SDK location into the ignored `android/local.properties`, then runs `npm ci`, including the native patches.
+2. When setup succeeds, double-click **`build-apk.bat`**.
+   - Builds one ARM64 release APK and prints its path and SHA-256 hash on success.
+   - Output: **`android\app\build\outputs\apk\release\app-release.apk`**.
+
+These scripts are for **x64 Windows 10/11** with Windows PowerShell 5.1+ (included with Windows). Install/update Microsoft's **App Installer** if `winget` is unavailable, or install Node/JDK manually and rerun setup. Tool installers can request administrator approval; review the prompts. Internet and substantial free disk space are required. The first native build can take a long time.
+
+The SDK location is taken from `android/local.properties`, then `ANDROID_HOME` / `ANDROID_SDK_ROOT`, falling back to `%LOCALAPPDATA%\Android\Sdk`. Existing SDK components can be reused. The scripts set tool paths for their own process; you do not need to restart the computer. If a manually installed tool still cannot be found, open a new terminal or set `JAVA_HOME` as explained below.
+
+Both launchers keep the window open at the end so you can read errors. From Command Prompt, you can skip that final pause:
+
+```bat
+install-build-dependencies.bat --no-pause
+build-apk.bat --no-pause
+```
+
+From PowerShell, prefix those commands with `.\`. They return a nonzero exit code on failure. SDK license prompts are still interactive; `--no-pause` does not accept licenses automatically.
+
+**Signing warning:** unless you configure your own keystore (see below), the APK uses the included public debug signing key. Do not treat it as a trusted production release.
+
+The batch files delegate to `scripts/windows/android-build.ps1`. Their syntax has been checked, but **they have not been executed on Windows**, and the native build is still unverified. The manual instructions below are also available if your toolchain needs adjustments.
+
 ## 1. Install the prerequisites
 
 - **Node.js 22 LTS**, including npm. Use Node 22.13 or later in that major version.
@@ -35,7 +65,7 @@ On Windows, extract into a short local path such as `C:\src\Offline-LLM` to redu
 ### Option B: clone the release tag
 
 ```sh
-git clone --branch v0.0.114-local-build.1 --depth 1 https://github.com/Zirren-Git/Offline-LLM.git
+git clone --branch v0.0.114-local-build.2 --depth 1 https://github.com/Zirren-Git/Offline-LLM.git
 cd Offline-LLM
 ```
 
