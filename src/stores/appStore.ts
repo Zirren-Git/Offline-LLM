@@ -29,7 +29,7 @@ import {
   emitChangedModelSettings,
   mobileModelSettingPatch,
 } from '../services/sync/mutation';
-import { createProAccessSlice, type ProAccessSlice } from './proAccessSlice';
+
 import {
   isExcludedTextModel,
   isSuspiciousRecoveredImageModel,
@@ -127,7 +127,9 @@ export type AppSettings = {
 
 type ThemeMode = 'system' | 'light' | 'dark';
 
-export interface AppState extends ProAccessSlice {
+export interface AppState {
+  desktopPromoDismissed: boolean;
+  setDesktopPromoDismissed: (value: boolean) => void;
   showSyncStatusBar: boolean;
   setShowSyncStatusBar: (visible: boolean) => void;
   themeMode: ThemeMode;
@@ -466,7 +468,8 @@ export const useAppStore = create<AppState>()(
       },
       hasEngagedSharePrompt: false,
       setHasEngagedSharePrompt: v => set({ hasEngagedSharePrompt: v }),
-      ...createProAccessSlice(state => set(state)),
+      desktopPromoDismissed: false,
+      setDesktopPromoDismissed: value => set({ desktopPromoDismissed: value }),
       toolCountHintDismissed: false,
       setToolCountHintDismissed: () => set({ toolCountHintDismissed: true }),
       loadedSettings: null,
@@ -503,13 +506,8 @@ function persistedAppState(state: AppState) {
         textGenerationCount: state.textGenerationCount,
         imageGenerationCount: state.imageGenerationCount,
         hasEngagedSharePrompt: state.hasEngagedSharePrompt,
-        hasRegisteredPro: state.hasRegisteredPro,
         // Persist eviction so a relaunch cannot grant Pro while the roster is offline.
-        proDeviceAdmission: state.proDeviceAdmission,
-        devProDisabled: state.devProDisabled,
-        proBannerDismissed: state.proBannerDismissed,
         desktopPromoDismissed: state.desktopPromoDismissed,
-        proAhaTriggeredBy: state.proAhaTriggeredBy,
         loadedSettings: state.loadedSettings,
   };
 }

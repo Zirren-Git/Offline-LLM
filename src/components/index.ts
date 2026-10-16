@@ -31,5 +31,5 @@ export { VisionRepairAdviceCard } from './VisionRepairAdviceCard';
 export { ProjectSelectorSheet } from './ProjectSelectorSheet';
 export { DebugSheet } from './DebugSheet';
 export { SharePromptSheet } from './SharePromptSheet';
-export { ProAhaSheet } from './ProAhaSheet';
+
 ;

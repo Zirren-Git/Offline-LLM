@@ -8,7 +8,7 @@ import { useTheme, useThemedStyles } from '../../theme';
 import { FONTS, TYPOGRAPHY, SPACING } from '../../constants';
 import { AVAILABLE_TOOLS } from '../../services/tools';
 import { useAppStore } from '../../stores';
-import { useOpenProTools } from '../../hooks/useOpenProTools';
+
 import type { ThemeColors, ThemeShadows } from '../../theme';
 
 const TOOL_WARNING_COLOR = '#F59E0B';
@@ -24,7 +24,6 @@ export const ToolsScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const { colors } = useTheme();
   const styles = useThemedStyles(createStyles);
-  const openProTools = useOpenProTools();
 
   const enabledTools = useAppStore(st => st.settings.enabledTools) || [];
   const updateSettings = useAppStore(st => st.updateSettings);
@@ -56,21 +55,7 @@ export const ToolsScreen: React.FC = () => {
 
       <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
         {/* Pro Tools always sits on top of the listing. */}
-        <TouchableOpacity
-          style={styles.proToolsButton}
-          onPress={openProTools}
-          activeOpacity={0.75}
-          testID="tools-pro-tools"
-        >
-          <View style={styles.proToolsIcon}>
-            <IconMC name="crown" size={20} color={colors.primary} />
-          </View>
-          <View style={styles.toolInfo}>
-            <Text style={styles.toolName}>Pro Tools</Text>
-            <Text style={styles.toolDescription}>Email, calendar and MCP servers</Text>
-          </View>
-          <Icon name="chevron-right" size={18} color={colors.textMuted} />
-        </TouchableOpacity>
+        
 
         {showHint && (
           <View style={[styles.hintBanner, { backgroundColor: colors.surface }]}>

@@ -1,10 +1,6 @@
 import {
-  chatStreamPhaseIsStatus,
-  chatStreamPhaseLabel,
-  chatStreamPreviewHasMessageBody,
   isSupportingChatContext,
   splitInlineReasoning,
-  type ChatStreamPreviewRow,
 } from '@offgrid/sync';
 import { Message } from '../../types';
 import { visibleMessages } from '../../utils/visibleMessages';
@@ -294,7 +290,6 @@ function groupAssistantTurnWork(
  * Shaped by shared sync (`chatStreamPreviewRows`) rather than here, so the phone and the Mac append
  * the same rows in the same order under the same ids.
  */
-export type RemoteStreamItem = ChatStreamPreviewRow;
 
 export type StreamingState = {
   isThinking: boolean;
@@ -308,7 +303,6 @@ export type StreamingState = {
   /** What the turn is doing with its documents before the model starts ("Searching 3 documents…"). */
   documentStatus?: string;
   /** Live previews from paired devices. Empty in free builds and when nothing is generating. */
-  remotePreviews?: readonly RemoteStreamItem[];
   /** This device's mesh id, so a peer's runtime notices can be told apart from its own. */
   localDeviceId?: string | null;
 };
@@ -321,83 +315,6 @@ export type StreamingState = {
  * per generation so the list keeps one row per in-flight reply and never collides with the local
  * 'streaming' row - a device can be generating locally while a peer generates too.
  */
-function withRemotePreviews(
-  base: (Message | ChatMessageItem)[],
-  remotePreviews: readonly RemoteStreamItem[] | undefined,
-): (Message | ChatMessageItem)[] {
-  if (!remotePreviews || remotePreviews.length === 0) return base;
-  const durableMessageIds = new Set<string>();
-  for (const message of base) {
-    durableMessageIds.add(message.id);
-    if (message.uuid) durableMessageIds.add(message.uuid);
-  }
-  return [
-    ...base,
-    ...remotePreviews
-      .filter(
-        preview =>
-          !durableMessageIds.has(preview.messageId) &&
-          !base.some(message => sameRemoteAnswer(message, preview)),
-      )
-      .map(remotePreviewMessage),
-  ];
-}
-
-function sameRemoteAnswer(
-  message: Message | ChatMessageItem,
-  preview: RemoteStreamItem,
-): boolean {
-  if (
-    message.role !== 'assistant' ||
-    message.provenance?.originDeviceId !== preview.deviceId ||
-    !chatStreamPreviewHasMessageBody(preview)
-  ) {
-    return false;
-  }
-  return (
-    message.content.trim() === preview.content.trim() &&
-    (message.reasoningContent ?? '').trim() === (preview.reasoning ?? '').trim()
-  );
-}
-
-function remotePreviewMessage(preview: RemoteStreamItem): ChatMessageItem {
-  const phaseLabel = chatStreamPhaseLabel(preview.phase, preview.progress);
-  const hasMessageBody = chatStreamPreviewHasMessageBody(preview);
-  // One rule, asked three times, instead of three hand-kept lists of phase names. A status phase
-  // renders BESIDE whatever arrived, so it only becomes the whole row when nothing else has.
-  const isStatusPhase = chatStreamPhaseIsStatus(preview.phase);
-  const previewOwnedTools = preview.tools ?? [];
-  const isStatusOnly =
-    preview.phase === 'waiting' ||
-    (isStatusPhase && !hasMessageBody && !preview.reasoning) ||
-    (preview.phase === 'thinking' && !preview.reasoning && !preview.content);
-  const visibleStatus = preview.phase === 'thinking' ? '' : phaseLabel ?? '';
-  return {
-    // The id comes from the shared projection, so it is stable across frames.
-    id: preview.id,
-    role: 'assistant',
-    content: isStatusOnly ? visibleStatus : preview.content,
-    reasoningContent: preview.reasoning || undefined,
-    timestamp: Date.now(),
-    isThinking: isStatusOnly,
-    isStreaming: true,
-    suppressMessageBubble: isStatusPhase && !hasMessageBody,
-    // The preview owns every tool while the turn is live. Its stable message id lets the durable
-    // assistant record replace the whole preview atomically when it arrives, so calls appear as
-    // they start without leaving a duplicate after final message sync.
-    ...(previewOwnedTools.length
-      ? {
-          toolArtifacts: previewOwnedTools.map(tool => ({
-            name: tool.name,
-            result: tool.result ?? '',
-            status: tool.status,
-          })),
-        }
-      : {}),
-    ...(isStatusPhase && visibleStatus ? { statusText: visibleStatus } : {}),
-  };
-}
-
 let _lastDisplayBranch = '';
 export function getDisplayMessages(
   allMessages: Message[],
@@ -406,11 +323,9 @@ export function getDisplayMessages(
   const live = Boolean(
     streaming.isThinking ||
       streaming.isStreamingForThisConversation ||
-      streaming.isGeneratingForThisConversation ||
-      streaming.remotePreviews?.length,
+      streaming.isGeneratingForThisConversation,
   );
   return groupAssistantTurnWork(
-    withRemotePreviews(
       groupSupportingContextWithImage(
         localDisplayMessages(
         // The same rule the list rows use, so the thread and its preview never disagree.
@@ -418,8 +333,7 @@ export function getDisplayMessages(
           streaming,
         ),
       ),
-      streaming.remotePreviews,
-    ),
+
     live,
   );
 }

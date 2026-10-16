@@ -98,3 +98,6 @@ docs/wire-captures/
 
 # Scratch renders derived from scripts/e2e/fixtures (regenerable, not versioned)
 /tmp/
+
+# Locally downloaded Android deliverable
+/apk/

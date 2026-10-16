@@ -11,7 +11,7 @@ import { useModelsScreen } from './useModelsScreen';
 import { createStyles } from './styles';
 import { TextModelsTab } from './TextModelsTab';
 import { ImageModelsTab } from './ImageModelsTab';
-import { VoiceModelsUpsell } from '../../components/models/VoiceModelsUpsell';
+
 import { TranscriptionModelsTab } from './TranscriptionModelsTab';
 import { useSlot, SLOTS } from '../../bootstrap/slotRegistry';
 import type { ModelTab } from './types';
@@ -20,7 +20,6 @@ import { ScreenHeader } from '../../components/ScreenHeader';
 const MODEL_TABS: ReadonlyArray<{ key: ModelTab; label: string; testID?: string }> = [
   { key: 'text', label: 'Text' },
   { key: 'image', label: 'Image' },
-  { key: 'voice', label: 'Voice', testID: 'voice-models-tab' },
   { key: 'transcription', label: 'Speech', testID: 'transcription-models-tab' },
 ];
 
@@ -241,11 +240,7 @@ export const ModelsScreen: React.FC<ModelsScreenProps> = ({ embedded = false }) 
       )}
 
       {/* Voice Models Tab: pro panel when registered, otherwise an upsell. */}
-      {vm.activeTab === 'voice' && (
-        VoiceModelsPanel
-          ? <VoiceModelsPanel showRemoteModels={false} />
-          : <VoiceModelsUpsell onGetPro={() => vm.navigation.navigate('ProDetail')} />
-      )}
+      
 
       {/* Transcription Models Tab (speech-to-text, core). */}
       {vm.activeTab === 'transcription' && (

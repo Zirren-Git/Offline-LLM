@@ -22,6 +22,6 @@ export { StorageSettingsScreen } from './StorageSettingsScreen';
 export { SecuritySettingsScreen } from './SecuritySettingsScreen';
 export { RemoteServersScreen } from './RemoteServersScreen';
 export { RemoteServerEditorScreen } from './RemoteServerEditorScreen';
-export { ProDetailScreen } from './ProDetailScreen';
+
 export { AboutScreen } from './AboutScreen';
 export { ToolsScreen } from './ToolsScreen';

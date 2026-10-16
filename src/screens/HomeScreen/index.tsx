@@ -25,12 +25,12 @@ import {
   ModelRowType,
 } from '../../components/models/ModelsManagerSheet';
 import { WhisperPickerSheet } from '../../components/models/WhisperPickerSheet';
-import { VoiceModelsSheet } from '../../components/models/VoiceModelsSheet';
+
 import { useWhisperStore } from '../../stores/whisperStore';
 import { WHISPER_MODELS } from '../../services';
 import { useUiModeStore } from '../../stores/uiModeStore';
 import { SLOTS, useSlot } from '../../bootstrap/slotRegistry';
-import { useOpenSync } from '../../hooks/useOpenSync';
+
 import { useActiveRemoteModelLabels } from '../../hooks/useActiveRemoteModelLabels';
 import { openSupportEmail } from '../../utils/supportEmail';
 
@@ -60,7 +60,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
   const styles = useThemedStyles(createStyles);
   const SyncHomeCard = useSlot(SLOTS.homeSyncCard);
   const HomeNotificationsButton = useSlot(SLOTS.homeNotificationsButton);
-  const { isSyncUnlocked, openSync, openSyncNotifications } = useOpenSync();
 
   const {
     pickerType,
@@ -184,18 +183,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
               <Text style={styles.title}>Off Grid AI</Text>
             </View>
             <View style={styles.headerActions}>
-              {HomeNotificationsButton ? (
-                <HomeNotificationsButton onOpen={openSyncNotifications} />
-              ) : null}
-              <TouchableOpacity
-                onPress={() => navigation.navigate('ProDetail')}
-                hitSlop={8}
-                style={styles.crownButton}
-                accessibilityRole="button"
-                accessibilityLabel="Open Off Grid AI Pro"
-              >
-                <IconMC name="crown" size={16} color={colors.primary} />
-              </TouchableOpacity>
+              
+              
             </View>
           </View>
 
@@ -253,19 +242,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
             </Card>
           )}
 
-          {SyncHomeCard ? (
-            <AnimatedEntry index={2} staggerMs={50} trigger={focusTrigger}>
-              <SyncHomeCard
-                isUnlocked={isSyncUnlocked}
-                onOpen={openSync}
-                onOpenClipboard={() =>
-                  isSyncUnlocked
-                    ? navigation.navigate('Clipboard' as never)
-                    : navigation.navigate('ProDetail')
-                }
-              />
-            </AnimatedEntry>
-          ) : null}
+          
 
           {/* Recent Conversations */}
           {recentConversations.length > 0 && (
@@ -382,12 +359,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
         onClosed={reopenModelsAfterChildClose}
         onBackToModels={() => closeChildForModels(() => setWhisperOpen(false))}
       />
-      <VoiceModelsSheet
-        visible={voiceOpen}
-        onClose={() => setVoiceOpen(false)}
-        onClosed={reopenModelsAfterChildClose}
-        onBackToModels={() => closeChildForModels(() => setVoiceOpen(false))}
-      />
+      
 
       {/* Full-screen model-loading overlay (animated progress + rotating tips). */}
       <LoadingOverlay loadingState={loadingState} />

@@ -29,8 +29,8 @@ import { useAppStore } from '../../stores';
 import { getToolExtensions } from '../../services/tools/extensions';
 import { enableAssistantTools, useAssistantToolAvailability, useExtensionToolCount } from '../../services/tools/useExtensionToolCount';
 import { AVAILABLE_TOOLS } from '../../services/tools';
-import { useOpenProTools } from '../../hooks/useOpenProTools';
-import { useIsProActive } from '../../hooks/useIsProActive';
+
+
 import { getSlot, SLOTS } from '../../bootstrap/slotRegistry';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -172,7 +172,6 @@ export const ChatMessageArea: React.FC<ChatMessageAreaProps> = ({
   // below are non-reactive and the Pro Tools badge stayed stale until an app
   // restart. Return is intentionally unused — the count is naturally 0 when Pro
   // is inactive (no extensions registered); we only need the re-render.
-  const isProActive = useIsProActive();
   const assistantAvailability = useAssistantToolAvailability();
   // extToolCount is the live MCP tool count (the email/calendar extension reports 0
   // here because those live in settings.enabledTools — see EmailCalendarExtension).
@@ -195,7 +194,6 @@ export const ChatMessageArea: React.FC<ChatMessageAreaProps> = ({
     freeToolIds.has(id),
   ).length;
   const totalToolCount = freeToolsCount + proToolsCount;
-  const handleProToolsPress = useOpenProTools();
   const showSettingsDot = totalToolCount > 3 && !toolCountHintDismissed;
   const [inputHeight, setInputHeight] = useState(84);
   const flatListHeightRef = useRef(0);
@@ -425,19 +423,15 @@ export const ChatMessageArea: React.FC<ChatMessageAreaProps> = ({
           enabledToolCount={freeToolsCount}
           showSettingsDot={showSettingsDot}
           mcpToolCount={proToolsCount}
-          onMcpPress={handleProToolsPress}
+          onMcpPress={undefined}
           supportsToolCalling={chat.supportsToolCalling}
           supportsThinking={chat.supportsThinking}
           onRepairVision={handleRepairVision}
           isRemote={chat.activeModelInfo.isRemote}
           onImagePress={chat.handleImagePress}
-          assistantAvailability={
-            !isProActive
-              ? 'no-pro'
-              : assistantAvailability
-          }
+          assistantAvailability={'unavailable'}
           onAssistantEnableTools={enableAssistantTools}
-          onAssistantUpgrade={() => tabNav.navigate('ProDetail')}
+          onAssistantUpgrade={undefined}
           onAssistantSetupSync={() => tabNav.navigate('Sync')}
         />
       </View>

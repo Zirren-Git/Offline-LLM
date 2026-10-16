@@ -1,0 +1,11 @@
+{
+  "name": "@offgrid/ui",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Shared UI projection contracts (finite progress + rate sampling) for phone and desktop.",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  }
+}

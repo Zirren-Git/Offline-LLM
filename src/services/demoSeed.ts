@@ -236,12 +236,6 @@ export async function seedDemoData(deps: {
   await waitForChatPersistence();
 
   const warnings: string[] = [];
-  // Use the optional Pro module boundary; free builds keep the core demo only.
-  const pro = require('@offgrid/pro');
-  if (pro?.seedDemoSyncData) {
-    try { await pro.seedDemoSyncData(); }
-    catch (error) { warnings.push(`Sync demo: ${error instanceof Error ? error.message : String(error)}`); }
-  }
 
   let documents = 0;
   const notes = [

@@ -146,12 +146,7 @@ export const AutoSetupScreen: React.FC<Props> = ({
                         </Text>
                       </View>
                     ))}
-                    {VoiceIndicator ? (
-                      <VoiceIndicator
-                        onPress={() => navigation.push('ProDetail')}
-                        style={styles.planItem}
-                      />
-                    ) : null}
+                    
                   </View>
                   <Text style={styles.total}>
                     {formatBytes(plan.totalBytes)} download

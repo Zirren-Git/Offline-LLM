@@ -14,7 +14,7 @@ import {
   useRemoteServerStore,
 } from '../../stores';
 import { useSyncIdentityStore } from '../../stores/syncIdentityStore';
-import { useRemoteChatStreamPreviews } from './useRemoteChatStreamPreviews';
+
 import { useActiveTextModel } from '../../hooks/useActiveTextModel';
 import { hardwareService } from '../../services';
 import { useGeneratingConversationId } from '../../hooks/useGenerationSession';
@@ -303,7 +303,6 @@ export const useChatScreen = () => {
     generatingConversationId != null &&
     generatingConversationId === activeConversationId;
   // Replies generating on paired devices. Empty unless Pro's chat-stream service is running.
-  const remotePreviews = useRemoteChatStreamPreviews(activeConversationId);
   const documentStatus = useDocumentTurnStatusStore(s =>
     activeConversationId ? s.byConversation[activeConversationId] : undefined,
   );
@@ -319,12 +318,11 @@ export const useChatScreen = () => {
       loadingModelName: loadingModel?.name,
       isGeneratingForThisConversation,
       documentStatus,
-      remotePreviews,
       localDeviceId,
     }),
     [activeConversation?.messages, isThinking, hasStreamingText,
       isStreamingForThisConversation, isModelLoading, loadingModel?.name,
-      isGeneratingForThisConversation, documentStatus, remotePreviews, localDeviceId],
+      isGeneratingForThisConversation, documentStatus, localDeviceId],
   );
 
   const animateLastN = useChatPresentationLifecycle(

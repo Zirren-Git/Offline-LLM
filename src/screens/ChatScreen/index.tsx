@@ -14,11 +14,11 @@ import {
   hideAlert,
   showAlert,
   SharePromptSheet,
-  ProAhaSheet,
+
 } from '../../components';
 import { useEjectAllModels } from '../../hooks/useEjectAllModels';
 import { subscribeSharePrompt } from '../../utils/sharePrompt';
-import { subscribeProPrompt } from '../../services/proPrompt';
+
 import type { Conversation, Message } from '../../types';
 import { useTheme, useThemedStyles } from '../../theme';
 import { createStyles } from './styles';
@@ -33,7 +33,7 @@ import {
   ModelRowType,
 } from '../../components/models/ModelsManagerSheet';
 import { WhisperPickerSheet } from '../../components/models/WhisperPickerSheet';
-import { VoiceModelsSheet } from '../../components/models/VoiceModelsSheet';
+
 import { useWhisperStore } from '../../stores/whisperStore';
 import { WHISPER_MODELS } from '../../services';
 import { useActiveRemoteModelLabels } from '../../hooks/useActiveRemoteModelLabels';
@@ -151,17 +151,6 @@ export const ChatScreen: React.FC = () => {
   const [sharePromptVisible, setSharePromptVisible] = useState(false);
   useEffect(() => subscribeSharePrompt(() => setSharePromptVisible(true)), []);
 
-  const [proAhaVisible, setProAhaVisible] = useState(false);
-  const proAhaShownThisSession = useRef(false);
-  useEffect(
-    () =>
-      subscribeProPrompt(() => {
-    if (proAhaShownThisSession.current) return;
-    proAhaShownThisSession.current = true;
-    setProAhaVisible(true);
-      }),
-    [],
-  );
   // Only ONE AttachStep mounted at a time to avoid waypoint dots/lines.
 
   React.useEffect(() => {
@@ -327,15 +316,7 @@ export const ChatScreen: React.FC = () => {
             setWhisperOpen(false);
           }}
         />
-        <VoiceModelsSheet
-          visible={voiceOpen}
-          onClose={() => setVoiceOpen(false)}
-          onClosed={reopenModelsAfterChildClose}
-          onBackToModels={() => {
-            returnToModelsRef.current = true;
-            setVoiceOpen(false);
-          }}
-        />
+        
         <ChatMessageArea
           assistantSelected={assistantSelected}
           onAssistantSelectedChange={setAssistantSelected}
@@ -388,11 +369,7 @@ export const ChatScreen: React.FC = () => {
         visible={sharePromptVisible}
         onClose={() => setSharePromptVisible(false)}
       />
-      <ProAhaSheet
-        visible={proAhaVisible}
-        onClose={() => setProAhaVisible(false)}
-        onRegister={() => rootNavigation.navigate('ProDetail')}
-      />
+      
     </SafeAreaView>
   );
 };

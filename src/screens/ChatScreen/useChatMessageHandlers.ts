@@ -10,7 +10,7 @@ import {
   recordedTurnKind,
 } from './useChatGenerationActions';
 import type { GenerationDeps } from './useChatGenerationActions';
-import { supersedeSyncedReplies } from '../../services/sync/supersedeSyncedReplies';
+
 import { useChatStore } from '../../stores/chatStore';
 import { useRemoteServerStore } from '../../stores/remoteServerStore';
 import { enableAssistantTools } from '../../services/tools/useExtensionToolCount';
@@ -87,7 +87,6 @@ export async function handleRetryMessageFn(
   // Stop any in-flight TTS before deleting messages (no-op without pro audio)
   callHook(HOOKS.audioStop);
   // A synced reply shows as a live preview until its op lands; clear it too, or resend duplicates it.
-  supersedeSyncedReplies(p.activeConversationId);
   const ctx: RetryCtx = { message, genDeps, p, convId: p.activeConversationId, msgs };
   if (message.role === 'user') await retryFromUserMessage(ctx);
   else await retryFromAssistantMessage(ctx);
@@ -112,7 +111,6 @@ export async function handleEditMessageFn(genDeps: GenerationDeps, p: EditParams
   // Same as retry: no model loaded → alert instead of a silent no-op.
   if (!p.hasActiveModel) { genDeps.setAlertState(showAlert('No Model Selected', 'Please select a model first.')); return; }
   // Same as resend: a synced reply is a live preview until its op lands, so clear it before regenerating.
-  supersedeSyncedReplies(p.activeConversationId);
   // Preserve the turn's modality across an edit: an edited image prompt re-runs the image pipeline
   // (read BEFORE the update/delete strips the reply that records it), not a re-classification.
   const messages = useChatStore

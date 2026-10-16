@@ -51,6 +51,8 @@ module.exports = {
   // @offgrid/pro resolves — and so those copies aren't test-collected as duplicates.
   modulePathIgnorePatterns: ['<rootDir>/.claude/worktrees/'],
   moduleNameMapper: {
+    '^@offgrid/(models|rag|speech|ui)$': '<rootDir>/vendor/shared/packages/$1/src/index.ts',
+    '^@offgrid/rag/documents$': '<rootDir>/vendor/shared/packages/rag/src/documents/index.ts',
     '^@/(.*)$': '<rootDir>/src/$1',
     // Mirrors the metro alias so tests can import pro modules that reference core.
     '^@offgrid/core/(.*)$': '<rootDir>/src/$1',
@@ -64,10 +66,10 @@ module.exports = {
     // @offgrid/sync: test against SOURCE (jest transforms the TS) rather than the tsup dist,
     // which references @babel/runtime helpers not resolvable from the out-of-root package. Keep
     // these subpaths in step with metro.config.js's aliases and the package's exports map.
-    '^@offgrid/sync$': '<rootDir>/../shared/packages/sync/src/index.ts',
-    '^@offgrid/sync/rn$': '<rootDir>/../shared/packages/sync/src/adapters/rn-tcp.ts',
-    '^@offgrid/sync/rn-discovery$': '<rootDir>/../shared/packages/sync/src/adapters/rn-discovery.ts',
-    '^@offgrid/sync/portable$': '<rootDir>/../shared/packages/sync/src/portable/index.ts',
+    '^@offgrid/sync$': '<rootDir>/vendor/shared/packages/sync/src/index.ts',
+    '^@offgrid/sync/rn$': '<rootDir>/vendor/shared/packages/sync/src/adapters/rn-tcp.ts',
+    '^@offgrid/sync/rn-discovery$': '<rootDir>/vendor/shared/packages/sync/src/adapters/rn-discovery.ts',
+    '^@offgrid/sync/portable$': '<rootDir>/vendor/shared/packages/sync/src/portable/index.ts',
     // The sync source lives out-of-root; when jest transforms it, babel injects @babel/runtime
     // helper imports that would otherwise resolve from ../shared (where they aren't installed).
     // Pin them to mobile's own copy.
